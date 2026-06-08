@@ -9,7 +9,7 @@ This repository intentionally packages only the OpenClaw layer: plugin runtime, 
 - `openclaw.plugin.json` declares the `infomaniak` plugin and its tools.
 - `src/index.js` registers OpenClaw tools.
 - `src/pot-runner.js` safely spawns the Potassium `pot` binary.
-- `skills/infomaniak/SKILL.md` teaches the agent how to use the tools.
+- `skills/` teaches agents how to use the tools for Infomaniak workflows.
 - `test/` uses fake Potassium `pot` binaries and never calls Infomaniak.
 
 ## Requirements
