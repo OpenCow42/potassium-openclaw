@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { commandRisk, searchCatalog } from "../src/catalog.js";
 import { buildPotArgs, runPot } from "../src/pot-runner.js";
 
 test("buildPotArgs rejects token options", () => {
@@ -116,4 +117,11 @@ test("runPot denies mutations by default", async () => {
       ),
     /mutations are disabled/,
   );
+});
+
+test("mail move is cataloged as a mutation", () => {
+  const [entry] = searchCatalog({ namespace: "mail", query: "move", limit: 1 });
+
+  assert.equal(entry.command, "move");
+  assert.equal(commandRisk("mail", "move"), "mutation");
 });

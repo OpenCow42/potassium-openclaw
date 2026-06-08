@@ -112,6 +112,13 @@ export const commandCatalog = [
     requiredOptions: ["--mailbox-uuid", "--to", "--body"],
   },
   {
+    namespace: "mail",
+    command: "move",
+    summary: "Move Mail messages between folders.",
+    risk: "mutation",
+    requiredOptions: ["--mailbox-uuid", "--uid", "--to-folder-id"],
+  },
+  {
     namespace: "url-shortener",
     command: "list",
     summary: "List URL shortener links.",
@@ -148,6 +155,7 @@ const mutationPatterns = [
   /^forwarding-/,
   /^like-/,
   /^modify-/,
+  /^move$/,
   /^move-/,
   /^post-(create|delete)$/,
   /^remove-/,
