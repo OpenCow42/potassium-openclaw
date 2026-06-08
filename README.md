@@ -75,3 +75,7 @@ pot catalog --format json
 ```
 
 Until then, this repo includes a small seeded catalog for discovery and risk routing.
+
+## Security
+
+Please see [SECURITY.md](SECURITY.md) for supported branches, vulnerability reporting, and credential-handling expectations.
