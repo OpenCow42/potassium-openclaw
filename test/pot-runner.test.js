@@ -125,3 +125,22 @@ test("mail move is cataloged as a mutation", () => {
   assert.equal(entry.command, "move");
   assert.equal(commandRisk("mail", "move"), "mutation");
 });
+
+test("url shortener catalog includes read and mutation commands", () => {
+  const commands = searchCatalog({ namespace: "url-shortener", limit: 20 }).map(
+    (entry) => entry.command,
+  );
+
+  assert.deepEqual(commands, [
+    "list",
+    "list-v2",
+    "quota",
+    "quota-v2",
+    "create",
+    "create-v2",
+    "update",
+  ]);
+  assert.equal(commandRisk("url-shortener", "list-v2"), "read");
+  assert.equal(commandRisk("url-shortener", "create-v2"), "mutation");
+  assert.equal(commandRisk("url-shortener", "update"), "mutation");
+});

@@ -127,8 +127,22 @@ export const commandCatalog = [
   },
   {
     namespace: "url-shortener",
+    command: "list-v2",
+    summary: "List URL shortener links through the v2 route.",
+    risk: "read",
+    requiredOptions: [],
+  },
+  {
+    namespace: "url-shortener",
     command: "quota",
     summary: "Read URL shortener quota.",
+    risk: "read",
+    requiredOptions: [],
+  },
+  {
+    namespace: "url-shortener",
+    command: "quota-v2",
+    summary: "Read URL shortener quota through the v2 route.",
     risk: "read",
     requiredOptions: [],
   },
@@ -138,6 +152,20 @@ export const commandCatalog = [
     summary: "Create a short URL.",
     risk: "mutation",
     requiredOptions: ["--url"],
+  },
+  {
+    namespace: "url-shortener",
+    command: "create-v2",
+    summary: "Create a short URL through the v2 route when supported.",
+    risk: "mutation",
+    requiredOptions: ["--url"],
+  },
+  {
+    namespace: "url-shortener",
+    command: "update",
+    summary: "Update a short URL expiration date.",
+    risk: "mutation",
+    requiredOptions: ["--short-url-code", "--expiration-date"],
   },
 ];
 
