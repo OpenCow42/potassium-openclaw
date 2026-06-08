@@ -21,6 +21,8 @@ This repository does not compile Swift and does not know about Potassium's inter
 3. This OpenClaw plugin requires the `pot` command on `PATH` or accepts `potPath`.
 4. The bundled skill teaches the agent when to use the tools.
 
+See [Pot Installation Strategy](pot-installation-strategy.md) for the package-manager boundary.
+
 ## Mutation Policy
 
 `infomaniak_mutate` is optional and default-denied. Enable it only after the operator has configured OpenClaw tool allowlists and set:
