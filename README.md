@@ -1,23 +1,24 @@
 # potassium-openclaw
 
-OpenClaw integration for Infomaniak through the prebuilt Potassium CLI command `pot`.
+OpenClaw integration for the prebuilt Potassium CLI command `pot`, including workflows for supported Infomaniak services.
 
-This repository intentionally packages only the OpenClaw layer: plugin runtime, tool contracts, skill instructions, tests, and docs. Potassium is distributed separately as the prebuilt `pot` executable.
+This repository intentionally packages only OpenClaw skill instructions, metadata, tests, and docs. Potassium is distributed separately as the prebuilt `pot` executable.
+
+This is a skills-first package. It does not register native OpenClaw tools and it does not import Node process-spawning APIs. Agents run `pot` through OpenClaw's managed `exec` tool so host command execution stays behind OpenClaw exec policy, allowlists, approvals, sandboxing, and elevated-mode controls.
 
 ## Shape
 
-- `openclaw.plugin.json` declares the `infomaniak` plugin and its tools.
-- `src/index.js` registers OpenClaw tools.
-- `src/pot-runner.js` safely spawns the Potassium `pot` binary.
-- `skills/` teaches agents how to use the tools for Infomaniak workflows.
-- `test/` uses fake Potassium `pot` binaries and never calls Infomaniak.
+- `.codex-plugin/plugin.json` declares the bundle metadata and bundled skill root.
+- `skills/` teaches agents how to use `pot` through OpenClaw managed `exec`.
+- `test/` verifies skill metadata and the skills-first package boundary.
 
 ## Requirements
 
 - OpenClaw with plugin support.
 - Node.js 22 or newer.
-- A prebuilt Potassium `pot` binary on `PATH`, or an absolute `potPath` in plugin config.
-- `INFOMANIAK_TOKEN` available to the OpenClaw agent process, or a custom `tokenEnvName`.
+- A prebuilt Potassium `pot` binary on the `PATH` visible to OpenClaw.
+- `INFOMANIAK_TOKEN` available to the OpenClaw execution environment.
+- OpenClaw exec policy that allows or asks for `pot` commands.
 
 Potassium binary releases and package-manager metadata are handled outside this repository:
 
@@ -27,7 +28,7 @@ Potassium binary releases and package-manager metadata are handled outside this 
 
 ## Installing `pot`
 
-Install `pot` before enabling this OpenClaw plugin. The plugin discovers `pot` on `PATH`; if it is installed somewhere custom, set `potPath` in plugin config.
+Install `pot` before enabling this OpenClaw plugin. The skills declare `pot` as a required binary, and OpenClaw checks `PATH` when loading skills. If you need a pinned or custom build, put a `pot` wrapper or symlink on `PATH` and allowlist that resolved path.
 
 ### Homebrew
 
@@ -70,7 +71,7 @@ Manual archives and `.deb` packages are published in [OpenCow42/tool-releases](h
 
 ## Distribution Model
 
-This package should be distributed as a native OpenClaw plugin, preferably through ClawHub with npm as a fallback. It should not bundle the native `pot` executable or download/build it during plugin install.
+This package should be distributed as an OpenClaw-compatible Codex bundle, preferably through ClawHub with git/archive installs as a fallback. It should not bundle the native `pot` executable or download/build it during install.
 
 The bundled skills follow OpenClaw's documented [`SKILL.md` metadata shape](https://docs.openclaw.ai/tools/skills):
 
@@ -83,7 +84,55 @@ APT is documented as operator setup guidance rather than OpenClaw installer meta
 
 OpenClaw checks `requires.bins` on the host at skill load time. If an agent runs in a container sandbox, install `pot` inside that sandbox with a custom image or sandbox setup command.
 
-## Local Setup
+## Install in OpenClaw
+
+1. Make `pot` available:
+
+```sh
+pot version
+```
+
+2. Make the Infomaniak token available to the OpenClaw process as `INFOMANIAK_TOKEN`. Do not put the token in chat and do not pass it as `--token`.
+
+3. Allow `pot` through OpenClaw managed exec.
+
+For a strict allowlist posture:
+
+```sh
+openclaw exec-policy set --security allowlist --ask on-miss --ask-fallback deny
+openclaw approvals allowlist add "pot"
+```
+
+If you want to trust one resolved binary path instead of any `pot` on `PATH`, allowlist the absolute path:
+
+```sh
+openclaw approvals allowlist add "/opt/homebrew/bin/pot"
+```
+
+4. Install the skills bundle.
+
+From a local checkout:
+
+```sh
+openclaw plugins install --link .
+```
+
+From a published bundle, once available:
+
+```sh
+openclaw plugins install clawhub:opencow/potassium-openclaw
+```
+
+5. Verify OpenClaw can see the plugin and skills:
+
+```sh
+openclaw plugins inspect potassium --json
+openclaw skills check --json
+```
+
+After installation, ask OpenClaw to use the Potassium skill. The agent should call `pot` through the built-in `exec` tool, not through native plugin tools.
+
+## Local Development
 
 ```sh
 npm install
@@ -91,42 +140,11 @@ npm test
 npm run check
 ```
 
-Install the plugin locally:
+Run the optional local binary check when `pot` is installed:
 
 ```sh
-openclaw plugins install --link .
-openclaw plugins enable infomaniak
-openclaw plugins inspect infomaniak --runtime --json
+npm run doctor
 ```
-
-If `pot` is not on `PATH`, configure an explicit binary path:
-
-```json5
-{
-  plugins: {
-    entries: {
-      infomaniak: {
-        enabled: true,
-        config: {
-          potPath: "/absolute/path/to/pot",
-          tokenEnvName: "INFOMANIAK_TOKEN",
-          defaultFormat: "json",
-          mutationMode: "deny",
-          outputRoot: "/Users/me/Downloads/infomaniak"
-        }
-      }
-    }
-  }
-}
-```
-
-## Tools
-
-- `infomaniak_search_commands`: search the seeded Potassium command catalog.
-- `infomaniak_read`: run read-only Potassium commands through `pot`.
-- `infomaniak_mutate`: run mutation commands. This tool is optional and denied by default.
-
-All tools spawn Potassium through the `pot` executable with argv arrays and never through a shell. `--token` is rejected; credentials are inherited from the configured environment variable.
 
 ## Current Boundary
 
@@ -136,7 +154,7 @@ This package assumes Potassium will later expose a release-quality command catal
 pot catalog --format json
 ```
 
-Until then, this repo includes a small seeded catalog for discovery and risk routing.
+Until then, the bundled skills document the known `pot` command shapes and instruct agents to use `pot <namespace> --help` when unsure.
 
 ## Security
 

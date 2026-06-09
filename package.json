@@ -3,39 +3,20 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "OpenClaw plugin and skill for Infomaniak via the prebuilt Potassium CLI (`pot`).",
+  "description": "OpenClaw skills for the prebuilt Potassium CLI (`pot`).",
   "files": [
+    ".codex-plugin",
     "README.md",
     "SECURITY.md",
     "docs",
-    "openclaw.plugin.json",
-    "scripts",
-    "skills",
-    "src"
+    "skills"
   ],
   "scripts": {
-    "check": "node --check src/catalog.js && node --check src/pot-runner.js && node --check src/index.js && node --check scripts/check-pot.js",
-    "doctor": "node scripts/check-pot.js",
+    "check": "node --check test/skill-metadata.test.js && node --check test/skills-first-package.test.js",
+    "doctor": "pot version",
     "test": "node --test test/*.test.js"
-  },
-  "dependencies": {
-    "openclaw": ">=2026.5.17",
-    "typebox": "^1.0.0"
   },
   "engines": {
     "node": ">=22"
-  },
-  "openclaw": {
-    "extensions": [
-      "./src/index.js"
-    ],
-    "compat": {
-      "pluginApi": ">=2026.5.17",
-      "minGatewayVersion": "2026.5.17"
-    },
-    "build": {
-      "openclawVersion": "2026.5.17",
-      "pluginSdkVersion": "2026.5.17"
-    }
   }
 }

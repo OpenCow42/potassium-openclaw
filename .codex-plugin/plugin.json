@@ -1,0 +1,6 @@
+{
+  "name": "potassium",
+  "version": "0.1.0",
+  "description": "OpenClaw skills for using the Potassium pot CLI through managed exec.",
+  "skills": ["./skills"]
+}

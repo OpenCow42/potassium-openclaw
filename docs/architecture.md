@@ -2,35 +2,36 @@
 
 ## Boundary
 
-Potassium is the system of record for Infomaniak behavior. This package is a thin OpenClaw adapter that:
+Potassium is the system of record for Infomaniak behavior. This package is a thin OpenClaw skills adapter that:
 
-- discovers a prebuilt Potassium `pot` binary,
-- validates OpenClaw tool parameters,
-- injects credentials through environment variables,
-- spawns Potassium through `pot` without a shell,
-- parses JSON output when requested,
-- redacts secrets from errors,
-- keeps write paths contained.
+- declares the prebuilt Potassium `pot` binary as a skill requirement,
+- declares `INFOMANIAK_TOKEN` as the required credential environment variable,
+- teaches agents to run `pot` through OpenClaw's managed `exec` tool,
+- keeps binary execution behind OpenClaw exec policy, allowlists, approvals, sandboxing, and elevated-mode controls,
+- avoids native plugin process spawning.
 
-This repository does not compile Swift and does not know about Potassium's internal dependencies.
+This repository does not compile Swift, vendor Potassium, register native OpenClaw tools, or import Node process-spawning APIs.
 
 ## Release Direction
 
 1. Potassium publishes signed or checksummed binary artifacts whose executable is named `pot` through [OpenCow42/tool-releases](https://github.com/OpenCow42/tool-releases).
 2. Homebrew installs those prebuilt artifacts through [OpenCow42/homebrew-tap](https://github.com/OpenCow42/homebrew-tap), and Debian-family systems can use [OpenCow42/apt-repo](https://github.com/OpenCow42/apt-repo).
-3. This OpenClaw plugin is distributed as a native OpenClaw package through ClawHub or npm.
+3. This OpenClaw integration is distributed as a Codex-compatible bundle through ClawHub, git, or archives.
 4. The bundled skills use documented OpenClaw skill metadata: top-level `homepage`, `metadata.openclaw.requires.bins`, `requires.env`, `primaryEnv`, and a Homebrew installer hint.
-5. The bundled skills teach the agent when to use the tools.
-6. The plugin accepts `potPath` for pinned binaries when `pot` is not on `PATH`.
+5. Operators allow `pot` through OpenClaw exec approvals, either by bare command name or by resolved absolute path.
+6. The bundled skills teach the agent when and how to use `pot` through managed `exec`.
 
-See [Pot Installation Strategy](pot-installation-strategy.md) for the package-manager boundary.
+See [Pot Installation Strategy](pot-installation-strategy.md) for the package-manager and execution boundary.
 
 ## Mutation Policy
 
-`infomaniak_mutate` is optional and default-denied. Enable it only after the operator has configured OpenClaw tool allowlists and set:
+Mutations are controlled by user intent plus OpenClaw exec policy. The skills treat create, update, delete, upload, move, send, schedule, share, and similar commands as mutations and instruct agents to run them only when explicitly requested.
 
-```json5
-{ plugins: { entries: { infomaniak: { config: { mutationMode: "allow" } } } } }
+At the host boundary, operators should keep `pot` behind OpenClaw exec approvals. A strict local setup is:
+
+```sh
+openclaw exec-policy set --security allowlist --ask on-miss --ask-fallback deny
+openclaw approvals allowlist add "pot"
 ```
 
-Per-call approval hooks can be added later, but the initial scaffold fails closed.
+Use an absolute allowlist path when the operator wants to trust only one installed binary.

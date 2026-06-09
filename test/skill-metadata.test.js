@@ -18,6 +18,9 @@ test("bundled skills follow documented OpenClaw skill metadata", async () => {
     const frontmatter = extractFrontmatter(markdown, skillPath);
     const metadata = extractOpenClawMetadata(frontmatter, skillPath);
 
+    assert.equal(findFrontmatterValue(frontmatter, "name"), skillName, `${skillName} frontmatter name must match directory`);
+    assert.notEqual(skillName, "infomaniak", "bundle must not expose Infomaniak as a skill/tool name");
+
     assert.equal(
       findFrontmatterValue(frontmatter, "homepage"),
       "https://github.com/OpenCow42/tool-releases",
