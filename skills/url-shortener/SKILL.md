@@ -1,8 +1,9 @@
 ---
 name: url-shortener
 description: Use Infomaniak Chk URL shortener through the prebuilt Potassium CLI command pot and the OpenClaw infomaniak plugin. Use when an agent needs to create short links, list existing short links, check quota, update expiration dates, compose chk.me public URLs from returned codes, or handle url-shortener pot quirks while following Infomaniak token safety rules.
+homepage: https://github.com/OpenCow42/tool-releases
 user-invocable: true
-metadata: {"openclaw":{"requires":{"bins":["pot"],"env":["INFOMANIAK_TOKEN"]},"primaryEnv":"INFOMANIAK_TOKEN","tools":["infomaniak_search_commands","infomaniak_read","infomaniak_mutate"]}}
+metadata: {"openclaw":{"requires":{"bins":["pot"],"env":["INFOMANIAK_TOKEN"]},"primaryEnv":"INFOMANIAK_TOKEN","install":[{"id":"brew-potassium","kind":"brew","formula":"opencow42/tap/potassium","bins":["pot"],"label":"Install Potassium CLI (brew)"}]}}
 ---
 
 # URL Shortener

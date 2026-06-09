@@ -19,7 +19,69 @@ This repository intentionally packages only the OpenClaw layer: plugin runtime, 
 - A prebuilt Potassium `pot` binary on `PATH`, or an absolute `potPath` in plugin config.
 - `INFOMANIAK_TOKEN` available to the OpenClaw agent process, or a custom `tokenEnvName`.
 
-Potassium release and Homebrew distribution are handled outside this repository.
+Potassium binary releases and package-manager metadata are handled outside this repository:
+
+- Homebrew tap: [OpenCow42/homebrew-tap](https://github.com/OpenCow42/homebrew-tap)
+- APT repository: [OpenCow42/apt-repo](https://github.com/OpenCow42/apt-repo)
+- Binary releases: [OpenCow42/tool-releases](https://github.com/OpenCow42/tool-releases)
+
+## Installing `pot`
+
+Install `pot` before enabling this OpenClaw plugin. The plugin discovers `pot` on `PATH`; if it is installed somewhere custom, set `potPath` in plugin config.
+
+### Homebrew
+
+```sh
+brew install opencow42/tap/potassium
+```
+
+Or add the tap explicitly:
+
+```sh
+brew tap opencow42/tap
+brew install potassium
+pot version
+```
+
+### APT
+
+```sh
+echo 'deb [trusted=yes] https://opencow42.github.io/apt-repo stable main' | sudo tee /etc/apt/sources.list.d/opencow.list
+sudo apt update
+sudo apt install potassium
+pot version
+```
+
+Ubuntu 24.04 and 26.04 can use explicit suites instead of the `stable` compatibility alias:
+
+```sh
+echo 'deb [trusted=yes] https://opencow42.github.io/apt-repo ubuntu24.04 main' | sudo tee /etc/apt/sources.list.d/opencow.list
+```
+
+```sh
+echo 'deb [trusted=yes] https://opencow42.github.io/apt-repo ubuntu26.04 main' | sudo tee /etc/apt/sources.list.d/opencow.list
+```
+
+The OpenCow APT repository currently uses `trusted=yes`; replace this with a signed `signed-by` setup when the repository publishes a signing key and signed metadata.
+
+### Direct Releases
+
+Manual archives and `.deb` packages are published in [OpenCow42/tool-releases](https://github.com/OpenCow42/tool-releases), with tool-scoped release tags such as [`potassium-0.0.2`](https://github.com/OpenCow42/tool-releases/releases/tag/potassium-0.0.2). Each archive or package has a sibling `.sha256` checksum file. Prefer Homebrew or APT for normal installs so upgrades and uninstall behavior stay with the host package manager.
+
+## Distribution Model
+
+This package should be distributed as a native OpenClaw plugin, preferably through ClawHub with npm as a fallback. It should not bundle the native `pot` executable or download/build it during plugin install.
+
+The bundled skills follow OpenClaw's documented [`SKILL.md` metadata shape](https://docs.openclaw.ai/tools/skills):
+
+- `homepage` points at the Potassium binary releases.
+- `metadata.openclaw.requires.bins` declares `pot`.
+- `metadata.openclaw.requires.env` and `primaryEnv` declare `INFOMANIAK_TOKEN`.
+- `metadata.openclaw.install` includes the supported Homebrew installer hint for `opencow42/tap/potassium`.
+
+APT is documented as operator setup guidance rather than OpenClaw installer metadata because OpenClaw's skill installer specs currently cover Homebrew, Node, Go, uv, and direct downloads, not APT. Direct download installer metadata is also intentionally omitted for now; the release page remains the source of truth for architecture-specific artifacts and checksum files.
+
+OpenClaw checks `requires.bins` on the host at skill load time. If an agent runs in a container sandbox, install `pot` inside that sandbox with a custom image or sandbox setup command.
 
 ## Local Setup
 

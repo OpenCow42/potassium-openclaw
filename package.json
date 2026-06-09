@@ -4,6 +4,15 @@
   "private": true,
   "type": "module",
   "description": "OpenClaw plugin and skill for Infomaniak via the prebuilt Potassium CLI (`pot`).",
+  "files": [
+    "README.md",
+    "SECURITY.md",
+    "docs",
+    "openclaw.plugin.json",
+    "scripts",
+    "skills",
+    "src"
+  ],
   "scripts": {
     "check": "node --check src/catalog.js && node --check src/pot-runner.js && node --check src/index.js && node --check scripts/check-pot.js",
     "doctor": "node scripts/check-pot.js",

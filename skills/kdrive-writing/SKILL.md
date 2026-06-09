@@ -1,8 +1,9 @@
 ---
 name: kdrive-writing
 description: Write files and folders to Infomaniak kDrive through the prebuilt Potassium CLI command pot and the OpenClaw infomaniak plugin. Use when an agent needs to create kDrive directories, upload local files, choose or verify parent folders, handle root write permission failures, or perform other kDrive mutations exposed by pot while following Infomaniak token safety rules.
+homepage: https://github.com/OpenCow42/tool-releases
 user-invocable: true
-metadata: {"openclaw":{"requires":{"bins":["pot"],"env":["INFOMANIAK_TOKEN"]},"primaryEnv":"INFOMANIAK_TOKEN","tools":["infomaniak_search_commands","infomaniak_read","infomaniak_mutate"]}}
+metadata: {"openclaw":{"requires":{"bins":["pot"],"env":["INFOMANIAK_TOKEN"]},"primaryEnv":"INFOMANIAK_TOKEN","install":[{"id":"brew-potassium","kind":"brew","formula":"opencow42/tap/potassium","bins":["pot"],"label":"Install Potassium CLI (brew)"}]}}
 ---
 
 # kDrive Writing

@@ -1,8 +1,9 @@
 ---
 name: infomaniak
 description: Interact with Infomaniak services through the prebuilt Potassium CLI command pot.
+homepage: https://github.com/OpenCow42/tool-releases
 user-invocable: true
-metadata: {"openclaw":{"requires":{"bins":["pot"],"env":["INFOMANIAK_TOKEN"]},"primaryEnv":"INFOMANIAK_TOKEN","homepage":"https://github.com/OpenCow42/potassium"}}
+metadata: {"openclaw":{"requires":{"bins":["pot"],"env":["INFOMANIAK_TOKEN"]},"primaryEnv":"INFOMANIAK_TOKEN","install":[{"id":"brew-potassium","kind":"brew","formula":"opencow42/tap/potassium","bins":["pot"],"label":"Install Potassium CLI (brew)"}]}}
 ---
 
 # Infomaniak

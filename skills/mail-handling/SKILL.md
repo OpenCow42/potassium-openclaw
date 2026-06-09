@@ -1,8 +1,9 @@
 ---
 name: mail-handling
 description: Use Infomaniak Mail through the prebuilt Potassium CLI command pot and the OpenClaw infomaniak plugin. Use when an agent needs to list mailboxes or folders, read threads or messages, create drafts, move messages between folders, handle unread mail, or work with Mail while following Infomaniak token safety rules.
+homepage: https://github.com/OpenCow42/tool-releases
 user-invocable: true
-metadata: {"openclaw":{"requires":{"bins":["pot"],"env":["INFOMANIAK_TOKEN"]},"primaryEnv":"INFOMANIAK_TOKEN","tools":["infomaniak_search_commands","infomaniak_read","infomaniak_mutate"]}}
+metadata: {"openclaw":{"requires":{"bins":["pot"],"env":["INFOMANIAK_TOKEN"]},"primaryEnv":"INFOMANIAK_TOKEN","install":[{"id":"brew-potassium","kind":"brew","formula":"opencow42/tap/potassium","bins":["pot"],"label":"Install Potassium CLI (brew)"}]}}
 ---
 
 # Mail Handling

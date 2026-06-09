@@ -1,7 +1,63 @@
 {
   "id": "infomaniak",
   "name": "Infomaniak",
-  "description": "Use the prebuilt Potassium CLI (`pot`) to interact with Infomaniak APIs.",
+  "description": "Use the prebuilt Potassium CLI command pot to interact with Infomaniak APIs.",
+  "activation": {
+    "onStartup": true
+  },
+  "skills": [
+    "./skills"
+  ],
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "potPath": {
+        "type": "string",
+        "description": "Absolute path to the Potassium pot binary. Defaults to PATH lookup."
+      },
+      "tokenEnvName": {
+        "type": "string",
+        "description": "Environment variable containing the Infomaniak bearer token."
+      },
+      "defaultFormat": {
+        "anyOf": [
+          {
+            "type": "string",
+            "const": "json"
+          },
+          {
+            "type": "string",
+            "const": "text"
+          }
+        ]
+      },
+      "mutationMode": {
+        "anyOf": [
+          {
+            "type": "string",
+            "const": "deny"
+          },
+          {
+            "type": "string",
+            "const": "allow"
+          }
+        ]
+      },
+      "outputRoot": {
+        "type": "string",
+        "description": "Containment root for --output paths."
+      },
+      "timeoutMs": {
+        "type": "number",
+        "minimum": 1000
+      },
+      "maxOutputBytes": {
+        "type": "number",
+        "minimum": 1024
+      }
+    }
+  },
+  "version": "0.1.0",
   "contracts": {
     "tools": [
       "infomaniak_search_commands",
@@ -12,52 +68,6 @@
   "toolMetadata": {
     "infomaniak_mutate": {
       "optional": true
-    }
-  },
-  "activation": {
-    "onStartup": true
-  },
-  "skills": [
-    "./skills"
-  ],
-  "configSchema": {
-    "type": "object",
-    "additionalProperties": false,
-    "properties": {
-      "potPath": {
-        "type": "string",
-        "description": "Absolute path to the prebuilt Potassium CLI binary (`pot`). Defaults to PATH lookup."
-      },
-      "tokenEnvName": {
-        "type": "string",
-        "description": "Environment variable that contains the Infomaniak bearer token."
-      },
-      "defaultFormat": {
-        "type": "string",
-        "enum": [
-          "json",
-          "text"
-        ]
-      },
-      "mutationMode": {
-        "type": "string",
-        "enum": [
-          "deny",
-          "allow"
-        ]
-      },
-      "outputRoot": {
-        "type": "string",
-        "description": "Required containment directory for commands that write to --output."
-      },
-      "timeoutMs": {
-        "type": "number",
-        "minimum": 1000
-      },
-      "maxOutputBytes": {
-        "type": "number",
-        "minimum": 1024
-      }
     }
   }
 }
