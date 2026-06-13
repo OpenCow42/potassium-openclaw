@@ -5,7 +5,6 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 const repositoryRoot = fileURLToPath(new URL("../", import.meta.url));
-const liquidPotassiumSha = "28450a310eeed5ffb18e05e9a93f60be506260b8";
 const expectedToolNames = [
   "infomaniak_domains",
   "infomaniak_search",
@@ -24,7 +23,7 @@ const dangerousRuntimeImports = [
   "worker_threads",
 ];
 
-test("package declares a native OpenClaw plugin backed by a pinned liquid-potassium commit", async () => {
+test("package declares a native OpenClaw plugin backed by the published liquid-potassium package", async () => {
   const packageJson = JSON.parse(await readFile(join(repositoryRoot, "package.json"), "utf8"));
   const nativeManifest = JSON.parse(await readFile(join(repositoryRoot, "openclaw.plugin.json"), "utf8"));
   const codexManifest = JSON.parse(await readFile(join(repositoryRoot, ".codex-plugin", "plugin.json"), "utf8"));
@@ -42,7 +41,7 @@ test("package declares a native OpenClaw plugin backed by a pinned liquid-potass
   assert.equal(packageJson.publishConfig?.access, "public");
   assert.deepEqual(packageJson.files, [".codex-plugin", "openclaw.plugin.json", "index.js", "README.md", "LICENSE", "SECURITY.md", "docs", "skills"]);
   assert.deepEqual(packageJson.openclaw?.extensions, ["./index.js"]);
-  assert.equal(packageJson.dependencies?.["liquid-potassium"], `github:OpenCow42/liquidPotassium#${liquidPotassiumSha}`);
+  assert.equal(packageJson.dependencies?.["liquid-potassium"], "0.1.0");
   assert.equal(packageJson.peerDependencies?.openclaw, ">=2026.6.6");
 
   assert.equal(nativeManifest.id, "potassium");
