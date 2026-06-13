@@ -41,7 +41,7 @@ test("package declares a native OpenClaw plugin backed by the published liquid-p
   assert.equal(packageJson.publishConfig?.access, "public");
   assert.deepEqual(packageJson.files, [".codex-plugin", "openclaw.plugin.json", "index.js", "README.md", "LICENSE", "SECURITY.md", "docs", "skills"]);
   assert.deepEqual(packageJson.openclaw?.extensions, ["./index.js"]);
-  assert.equal(packageJson.dependencies?.["liquid-potassium"], "0.1.0");
+  assert.equal(packageJson.dependencies?.["liquid-potassium"], "0.2.0");
   assert.equal(packageJson.peerDependencies?.openclaw, ">=2026.6.6");
 
   assert.equal(nativeManifest.id, "potassium");

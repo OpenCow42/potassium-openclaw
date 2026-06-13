@@ -21,7 +21,7 @@ This project is licensed under [Apache-2.0](LICENSE).
 `liquid-potassium` is consumed from npm and pinned to the published package version:
 
 ```json
-"liquid-potassium": "0.1.0"
+"liquid-potassium": "0.2.0"
 ```
 
 The published package includes built runtime output, so imports such as `liquid-potassium/openclaw/tools` work without install-time build scripts.

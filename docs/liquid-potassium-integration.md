@@ -5,16 +5,16 @@
 Use `liquid-potassium` as a Node dependency pinned to the published npm package version:
 
 ```json
-"liquid-potassium": "0.1.0"
+"liquid-potassium": "0.2.0"
 ```
 
-The package is published at <https://www.npmjs.com/package/liquid-potassium/v/0.1.0>.
+The package is published at <https://www.npmjs.com/package/liquid-potassium/v/0.2.0>.
 
 ## Published Package Requirements
 
 OpenClaw installs may run dependency installation with lifecycle scripts disabled. The published `liquid-potassium` package must therefore include built runtime output instead of relying on `prepare` or another install-time build.
 
-Version `0.1.0` includes built runtime files for the OpenClaw entrypoints, so imports such as `liquid-potassium/openclaw/tools` work without install-time build scripts.
+Version `0.2.0` includes built runtime files for the OpenClaw entrypoints, so imports such as `liquid-potassium/openclaw/tools` work without install-time build scripts.
 
 ## OpenClaw Package Responsibilities
 
