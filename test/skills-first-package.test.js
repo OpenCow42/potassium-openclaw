@@ -16,6 +16,7 @@ const expectedToolNames = [
   "infomaniak_workflow_run",
   "infomaniak_call",
 ];
+const expectedChannelIds = ["kchat"];
 const dangerousRuntimeImports = [
   ["node:child", "_process"].join(""),
   ["child", "_process"].join(""),
@@ -47,11 +48,17 @@ test("package declares a native OpenClaw plugin backed by the published liquid-p
   assert.equal(nativeManifest.id, "potassium");
   assert.equal(nativeManifest.name, "Potassium");
   assert.deepEqual(nativeManifest.skills, ["./skills"]);
+  assert.deepEqual(nativeManifest.channels, expectedChannelIds);
+  assert.deepEqual(nativeManifest.channelEnvVars?.kchat, ["INFOMANIAK_TOKEN"]);
   assert.deepEqual(nativeManifest.contracts?.tools, expectedToolNames);
   assert.equal("token" in nativeManifest.configSchema?.properties, false);
   assert.equal(nativeManifest.configSchema?.properties?.tokenEnvName?.default, "INFOMANIAK_TOKEN");
   assert.equal(nativeManifest.configSchema?.properties?.blockMutating?.default, true);
   assert.deepEqual(nativeManifest.setup?.providers?.[0]?.envVars, ["INFOMANIAK_TOKEN"]);
+  assert.equal(nativeManifest.channelConfigs?.kchat?.label, "Infomaniak kChat");
+  assert.equal(nativeManifest.channelConfigs?.kchat?.schema?.additionalProperties, false);
+  assert.equal("token" in nativeManifest.channelConfigs?.kchat?.schema?.properties, false);
+  assert.equal(nativeManifest.channelConfigs?.kchat?.schema?.properties?.tokenEnvName?.default, "INFOMANIAK_TOKEN");
 
   assert.equal(codexManifest.name, "potassium");
   assert.equal(codexManifest.license, "Apache-2.0");
@@ -65,11 +72,17 @@ test("runtime entry registers exactly the manifest tool contracts", async () => 
   const pluginModule = await import(pathToFileURL(join(repositoryRoot, "index.js")).href);
   const plugin = pluginModule.default;
   const registeredTools = [];
+  const registeredChannels = [];
 
   assert.equal("token" in pluginModule.PotassiumPluginConfigJsonSchema.properties, false);
+  assert.equal("token" in pluginModule.PotassiumKchatChannelConfigJsonSchema.properties, false);
 
   plugin.register({
     pluginConfig: { allowedDomains: ["kdrive"], tokenEnvName: "INFOMANIAK_TOKEN" },
+    config: { channels: { kchat: { enabled: true } } },
+    registerChannel(channel) {
+      registeredChannels.push(channel);
+    },
     registerTool(tool) {
       registeredTools.push(tool);
     },
@@ -79,6 +92,14 @@ test("runtime entry registers exactly the manifest tool contracts", async () => 
   assert.equal(plugin.name, "Potassium");
   assert.deepEqual(registeredTools.map((tool) => tool.name), expectedToolNames);
   assert.ok(registeredTools.every((tool) => tool.label && tool.description && tool.parameters));
+  assert.deepEqual(registeredChannels.map(({ plugin: channelPlugin }) => channelPlugin.id), expectedChannelIds);
+
+  const [kchatChannel] = registeredChannels.map(({ plugin: channelPlugin }) => channelPlugin);
+  assert.equal(kchatChannel.meta.label, "Infomaniak kChat");
+  assert.deepEqual(kchatChannel.capabilities.chatTypes, ["direct", "group", "channel", "thread"]);
+  assert.equal("outbound" in kchatChannel, false);
+  assert.equal(kchatChannel.config.hasConfiguredState({ cfg: {}, env: { INFOMANIAK_TOKEN: "placeholder" } }), true);
+  assert.equal(kchatChannel.config.hasConfiguredState({ cfg: {}, env: {} }), false);
 });
 
 test("runtime entry rejects direct bearer-token config", async () => {
