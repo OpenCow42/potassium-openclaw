@@ -61,6 +61,7 @@ test("package declares a native OpenClaw plugin backed by the published liquid-p
   assert.equal("token" in nativeManifest.channelConfigs?.kchat?.schema?.properties, false);
   assert.equal(nativeManifest.channelConfigs?.kchat?.schema?.properties?.tokenEnvName?.default, "INFOMANIAK_TOKEN");
   assert.equal(nativeManifest.channelConfigs?.kchat?.schema?.properties?.teamName?.type, "string");
+  assert.equal(nativeManifest.channelConfigs?.kchat?.schema?.properties?.apiBaseUrl?.type, "string");
   assert.equal(nativeManifest.channelConfigs?.kchat?.schema?.properties?.defaultChannel?.type, "string");
   assert.equal(nativeManifest.channelConfigs?.kchat?.schema?.properties?.setOnline?.type, "boolean");
   assert.equal(nativeManifest.channelConfigs?.kchat?.schema?.properties?.webhookPath?.default, "/channels/kchat/webhook");
@@ -224,6 +225,55 @@ test("kChat outbound resolves #channel destinations before creating posts", asyn
   assert.equal(result.messageId, "post-456");
   assert.equal(result.receipt.threadId, "thread-root");
   assert.equal(result.receipt.replyToId, "reply-ignored-when-thread-exists");
+});
+
+test("kChat outbound works with the published liquid-potassium client shape", async () => {
+  const { sendKchatText } = await import(pathToFileURL(join(repositoryRoot, "index.js")).href);
+  const tokenEnvName = "POTASSIUM_TEST_INFOMANIAK_TOKEN";
+  const originalToken = process.env[tokenEnvName];
+  const requests = [];
+
+  process.env[tokenEnvName] = "placeholder-token";
+  try {
+    var result = await sendKchatText(
+      {
+        cfg: { channels: { kchat: { teamName: "main-team", tokenEnvName, setOnline: false } } },
+        to: "#alerts",
+        text: "published client shape",
+      },
+      {
+        fetch: async (url, init) => {
+          requests.push({
+            url: String(url),
+            method: init.method,
+            body: init.body,
+          });
+          if (String(url).includes("/teams/name/main-team/channels/name/alerts")) {
+            return jsonResponse({ id: "alerts-channel-id", name: "alerts" });
+          }
+
+          return jsonResponse({ id: "post-from-real-client-shape", channel_id: "alerts-channel-id" });
+        },
+      },
+    );
+  } finally {
+    if (originalToken === undefined) {
+      delete process.env[tokenEnvName];
+    } else {
+      process.env[tokenEnvName] = originalToken;
+    }
+  }
+
+  assert.equal(requests.length, 2);
+  assert.equal(requests[0].method, "GET");
+  assert.equal(requests[0].url, "https://main-team.kchat.infomaniak.com/api/v4/teams/name/main-team/channels/name/alerts");
+  assert.equal(requests[1].method, "POST");
+  assert.equal(requests[1].url, "https://main-team.kchat.infomaniak.com/api/v4/posts?set_online=false");
+  assert.deepEqual(JSON.parse(requests[1].body), {
+    channel_id: "alerts-channel-id",
+    message: "published client shape",
+  });
+  assert.equal(result.messageId, "post-from-real-client-shape");
 });
 
 test("kChat inbound webhook dispatches valid JSON payloads through the channel runtime", async () => {
@@ -551,4 +601,13 @@ function createKchatRuntimeStub({ inboundRuns, routeCalls = [], contextCalls = [
       },
     },
   };
+}
+
+function jsonResponse(payload) {
+  return new Response(JSON.stringify(payload), {
+    status: 200,
+    headers: {
+      "content-type": "application/json",
+    },
+  });
 }

@@ -48,6 +48,47 @@ The plugin registers these tools:
 
 Prefer workflow tools for reviewed domain actions. Use search/describe/discover/call only when a reviewed workflow does not fit.
 
+## kChat Channel
+
+The plugin also declares a dedicated OpenClaw channel capability named `kchat` for outbound kChat replies and inbound kChat outgoing webhooks. Configure it under `channels.kchat` inside the Potassium plugin config.
+
+Supported kChat channel config:
+
+- `teamName`: default kChat team name for resolving channel names.
+- `apiBaseUrl`: optional team-specific kChat API base URL. When omitted, Potassium derives `https://<teamName>.kchat.infomaniak.com` from a DNS-safe `teamName`.
+- `defaultChannel`: default outbound destination.
+- `setOnline`: optional `set_online` value sent with outbound posts.
+- `webhookPath`: gateway path for inbound outgoing webhooks, default `/channels/kchat/webhook`.
+- `outgoingWebhookTokenEnvName`: environment variable for the webhook verification token, default `INFOMANIAK_KCHAT_OUTGOING_WEBHOOK_TOKEN`.
+- `ignoredUserIds`: sender user IDs to ignore for inbound events.
+- `ignoredUserNames`: sender usernames to ignore for inbound events.
+
+Outbound destinations support `id:<channel_id>`, `#channel`, `channel`, and `team/channel`. Thread replies use the root post or reply id as the kChat thread root id.
+
+Inbound setup is intentionally environment-only for secrets: create a kChat outgoing webhook in Infomaniak/kChat that points at the OpenClaw gateway URL plus `webhookPath`, set the webhook verification token in `INFOMANIAK_KCHAT_OUTGOING_WEBHOOK_TOKEN` or the configured env var, and add the posting account to `ignoredUserIds` or `ignoredUserNames` to avoid reply loops. kChat/Mattermost outgoing webhook payloads may arrive as JSON, form-urlencoded fields, or a form `payload` JSON value.
+
+Example non-secret kChat config:
+
+```json5
+{
+  channels: {
+    kchat: {
+      enabled: true,
+      teamName: "example-team",
+      apiBaseUrl: "https://example-team.kchat.infomaniak.com",
+      defaultChannel: "id:<channel-id>",
+      setOnline: false,
+      webhookPath: "/channels/kchat/webhook",
+      outgoingWebhookTokenEnvName: "INFOMANIAK_KCHAT_OUTGOING_WEBHOOK_TOKEN",
+      ignoredUserIds: ["<posting-user-id>"],
+      ignoredUserNames: ["<posting-user-name>"]
+    }
+  }
+}
+```
+
+The same channel could also be addressed as `#support`, `support`, or `example-team/support` when `teamName` is available. Bearer/API tokens and webhook verification tokens must stay in environment variables and must never be committed to plugin config.
+
 ## Configuration
 
 Default credential injection reads `INFOMANIAK_TOKEN`. Direct bearer-token config is intentionally rejected by this adapter; use an environment variable instead. Supported plugin config includes:
@@ -112,7 +153,18 @@ openclaw config patch --stdin <<'JSON5'
         config: {
           tokenEnvName: "INFOMANIAK_TOKEN",
           blockMutating: true,
-          allowedDomains: ["kdrive", "mail", "kchat", "urlShortener"]
+          allowedDomains: ["kdrive", "mail", "kchat", "urlShortener"],
+          channels: {
+            kchat: {
+              enabled: true,
+              teamName: "example-team",
+              apiBaseUrl: "https://example-team.kchat.infomaniak.com",
+              defaultChannel: "id:<channel-id>",
+              outgoingWebhookTokenEnvName: "INFOMANIAK_KCHAT_OUTGOING_WEBHOOK_TOKEN",
+              ignoredUserIds: ["<posting-user-id>"],
+              ignoredUserNames: ["<posting-user-name>"]
+            }
+          }
         }
       }
     }

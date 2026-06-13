@@ -10,3 +10,7 @@
 - Validation after pass 2: `npm test`, `npm run check`, and `git diff --check` passed.
 - Worker pass 3: implemented inbound kChat outgoing webhook support with plugin-managed token verification from `INFOMANIAK_KCHAT_OUTGOING_WEBHOOK_TOKEN`, configurable webhook path, ignored sender lists, JSON/form/payload body parsing, redacted raw payload metadata, Mattermost-style field normalization, and dispatch through `runtime.channel.inbound.run`.
 - Validation after pass 3: `npm test`, `npm run check`, and `git diff --check` passed. Inbound webhook tests use mocked route/runtime dispatch and make no live Infomaniak API calls.
+- Worker pass 4: documented the dedicated `kchat` OpenClaw channel capability, channel config fields, outbound destination grammar, inbound outgoing webhook setup, loop-prevention ignored senders, and non-secret workspace example values.
+- Validation after pass 4: `npm test`, `npm run check`, and `git diff --check` passed. No live Infomaniak API calls were made.
+- Orchestrator live fix: adjusted outbound delivery to use the published `liquid-potassium` client shape and the team-specific kChat API host derived from `teamName` or `apiBaseUrl`.
+- Live outbound verification: posted one smoke-test message to the configured kChat `test` channel using `INFOMANIAK_TOKEN` from the environment; returned post id `019ec1f4-8f45-736c-ada5-e17d4ecf2cab`. Inbound live verification still requires `INFOMANIAK_KCHAT_OUTGOING_WEBHOOK_TOKEN` to be set in the OpenClaw gateway environment and an external callback URL configured in kChat.

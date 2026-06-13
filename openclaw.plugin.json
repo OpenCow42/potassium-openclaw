@@ -110,6 +110,10 @@
             "type": "string",
             "description": "Default kChat team name used when resolving channel names."
           },
+          "apiBaseUrl": {
+            "type": "string",
+            "description": "Team-specific kChat API base URL. Defaults to https://<teamName>.kchat.infomaniak.com when teamName is configured."
+          },
           "defaultChannel": {
             "type": "string",
             "description": "Default kChat destination. Supports id:<channel_id>, #channel, channel, or team/channel."
@@ -155,6 +159,10 @@
         },
         "teamName": {
           "label": "Team name"
+        },
+        "apiBaseUrl": {
+          "label": "kChat API base URL",
+          "placeholder": "https://example-team.kchat.infomaniak.com"
         },
         "defaultChannel": {
           "label": "Default channel",

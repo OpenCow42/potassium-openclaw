@@ -35,6 +35,11 @@ export const PotassiumKchatChannelConfigJsonSchema = {
       type: "string",
       description: "Default kChat team name used when resolving channel names.",
     },
+    apiBaseUrl: {
+      type: "string",
+      description:
+        "Team-specific kChat API base URL. Defaults to https://<teamName>.kchat.infomaniak.com when teamName is configured.",
+    },
     defaultChannel: {
       type: "string",
       description: "Default kChat destination. Supports id:<channel_id>, #channel, channel, or team/channel.",
@@ -139,6 +144,7 @@ export const potassiumKchatChannelPlugin = {
         const name = readOptionalString(inputRecord.name);
         const tokenEnvName = readOptionalString(inputRecord.tokenEnvName);
         const teamName = readOptionalString(inputRecord.teamName);
+        const apiBaseUrl = readOptionalString(inputRecord.apiBaseUrl);
         const defaultChannel = readOptionalString(inputRecord.defaultChannel);
         const setOnline = readOptionalBoolean(inputRecord.setOnline);
         const webhookPath = readOptionalString(inputRecord.webhookPath);
@@ -156,6 +162,7 @@ export const potassiumKchatChannelPlugin = {
               ...(name ? { name } : {}),
               ...(tokenEnvName ? { tokenEnvName } : {}),
               ...(teamName ? { teamName } : {}),
+              ...(apiBaseUrl ? { apiBaseUrl } : {}),
               ...(defaultChannel ? { defaultChannel } : {}),
               ...(setOnline === undefined ? {} : { setOnline }),
               ...(webhookPath ? { webhookPath } : {}),
@@ -260,7 +267,7 @@ export async function sendKchatText(ctx, options = {}) {
     ...(rootId ? { root_id: rootId } : {}),
   };
   const query = resolveKchatSetOnlineQuery(channelConfig);
-  const providerResult = await client.kchat.createpost({
+  const providerResult = await resolveKchatOperations(client).createpost({
     body,
     ...(query ? { query } : {}),
     ...(ctx.signal ? { signal: ctx.signal } : {}),
@@ -686,7 +693,7 @@ async function resolveKchatDestination({ cfg, to, client, createClient, fetch, s
     createClient,
     fetch,
   });
-  const channel = await resolvedClient.kchat.getchannelbynameforteamname({
+  const channel = await resolveKchatOperations(resolvedClient).getchannelbynameforteamname({
     path: {
       team_name: namedDestination.teamName,
       channel_name: namedDestination.channelName,
@@ -768,11 +775,45 @@ function resolveKchatClient({ channelConfig, client, createClient, fetch }) {
     throw new Error(`Set ${tokenEnvName} in the environment before sending kChat messages.`);
   }
 
+  const baseUrl = resolveKchatApiBaseUrl(channelConfig);
+  if (!baseUrl) {
+    throw new Error("Configure channels.kchat.apiBaseUrl or a DNS-safe channels.kchat.teamName before sending kChat messages.");
+  }
+
   const clientFactory = createClient ?? createInfomaniakClient;
   return clientFactory({
     token,
+    baseUrl,
     fetch: fetch ?? globalThis.fetch,
   });
+}
+
+function resolveKchatApiBaseUrl(channelConfig) {
+  const apiBaseUrl = readOptionalString(channelConfig.apiBaseUrl);
+  if (apiBaseUrl) {
+    return apiBaseUrl;
+  }
+
+  const teamName = readOptionalString(channelConfig.teamName);
+  if (!teamName) {
+    return undefined;
+  }
+
+  const hostLabel = teamName.toLowerCase();
+  if (!/^[a-z0-9-]+$/.test(hostLabel)) {
+    throw new Error("channels.kchat.teamName must be a DNS-safe kChat team slug when apiBaseUrl is omitted.");
+  }
+
+  return `https://${hostLabel}.kchat.infomaniak.com`;
+}
+
+function resolveKchatOperations(client) {
+  const operations = client?.kchat?.operations ?? client?.kchat;
+  if (!isRecord(operations)) {
+    throw new Error("Infomaniak kChat operations are unavailable.");
+  }
+
+  return operations;
 }
 
 function resolveKchatRootId(ctx) {
