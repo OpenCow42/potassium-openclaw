@@ -2,7 +2,13 @@ import { buildJsonPluginConfigSchema, definePluginEntry } from "openclaw/plugin-
 import { createChannelPluginBase } from "openclaw/plugin-sdk/channel-core";
 import { createMessageReceiptFromOutboundResults, defineChannelMessageAdapter } from "openclaw/plugin-sdk/channel-outbound";
 import { isRequestBodyLimitError, readRequestBodyWithLimit, requestBodyErrorToText } from "openclaw/plugin-sdk/webhook-ingress";
-import { createInfomaniakClient } from "liquid-potassium";
+import {
+  createInfomaniakClient,
+  createKchatMattermostAuthFrame as createLiquidKchatMattermostAuthFrame,
+  normalizeKchatWebSocketPostEvent as normalizeLiquidKchatWebSocketPostEvent,
+  resolveKchatWebSocketUrl as resolveLiquidKchatWebSocketUrl,
+  runKchatWebSocketConnection as runLiquidKchatWebSocketConnection,
+} from "liquid-potassium";
 import { createInfomaniakOpenClawTools, InfomaniakPluginConfigJsonSchema, resolveInfomaniakPluginConfig } from "liquid-potassium/openclaw/tools";
 import { timingSafeEqual } from "node:crypto";
 
@@ -15,13 +21,10 @@ const DEFAULT_KCHAT_RECEIVE_MODE = "webhook";
 const KCHAT_RECEIVE_MODES = new Set(["webhook", "websocket", "both", "disabled"]);
 const DEFAULT_KCHAT_WEBSOCKET_RECONNECT_INITIAL_MS = 1000;
 const DEFAULT_KCHAT_WEBSOCKET_RECONNECT_MAX_MS = 30000;
-const KCHAT_WEBSOCKET_AUTH_SEQ = 1;
 const DEFAULT_KCHAT_WEBSOCKET_PROTOCOL = "infomaniak-echo";
 const KCHAT_WEBSOCKET_PROTOCOLS = new Set(["infomaniak-echo", "mattermost"]);
 const DEFAULT_KCHAT_ECHO_WEBSOCKET_HOST = "websocket.kchat.infomaniak.com";
 const DEFAULT_KCHAT_ECHO_APP_KEY = "kchat-key";
-const KCHAT_ECHO_CLIENT_NAME = "potassium-openclaw";
-const KCHAT_ECHO_CLIENT_VERSION = "0.2.0";
 const KCHAT_CHANNEL_ID = "kchat";
 
 export const PotassiumPluginConfigJsonSchema = withoutDirectTokenConfig(InfomaniakPluginConfigJsonSchema);
@@ -678,7 +681,6 @@ export async function dispatchKchatInboundWebhookEvent({ cfg, channelConfig, run
 export async function startKchatWebSocketGatewayAccount(options = {}) {
   const channelConfig = options.channelConfig ?? resolveKchatChannelConfig(options.cfg);
   const token = options.token ?? readKchatBearerTokenFromEnv(channelConfig, options.env ?? globalThis.process?.env);
-  const websocketUrl = resolveKchatWebSocketUrl(channelConfig);
   const reconnectInitialMs =
     readOptionalNumber(channelConfig.websocketReconnectInitialMs) ?? DEFAULT_KCHAT_WEBSOCKET_RECONNECT_INITIAL_MS;
   const reconnectMaxMs = readOptionalNumber(channelConfig.websocketReconnectMaxMs) ?? DEFAULT_KCHAT_WEBSOCKET_RECONNECT_MAX_MS;
@@ -694,7 +696,6 @@ export async function startKchatWebSocketGatewayAccount(options = {}) {
         ...options,
         channelConfig,
         token,
-        websocketUrl,
         runtime: options.runtime ?? { channel: options.channelRuntime },
       });
       reconnectDelayMs = reconnectInitialMs;
@@ -717,67 +718,56 @@ export async function startKchatWebSocketGatewayAccount(options = {}) {
 
 export async function runKchatWebSocketConnection(options = {}) {
   const channelConfig = options.channelConfig ?? resolveKchatChannelConfig(options.cfg);
-  if (resolveKchatWebSocketProtocol(channelConfig) === "infomaniak-echo") {
-    return runKchatEchoWebSocketConnection({
-      ...options,
-      channelConfig,
-    });
+  const token = options.token ?? readKchatBearerTokenFromEnv(channelConfig, options.env ?? globalThis.process?.env);
+  if (!token) {
+    throw new Error(`Set ${resolveKchatTokenEnvName(channelConfig)} in the environment before connecting to kChat WebSocket.`);
   }
-
   const WebSocketImpl = options.WebSocketImpl ?? globalThis.WebSocket;
   if (typeof WebSocketImpl !== "function") {
     throw new Error("A WebSocket implementation is required for kChat WebSocket receive mode.");
   }
 
-  const token = options.token ?? readKchatBearerTokenFromEnv(channelConfig, options.env ?? globalThis.process?.env);
-  if (!token) {
-    throw new Error(`Set ${resolveKchatTokenEnvName(channelConfig)} in the environment before connecting to kChat WebSocket.`);
-  }
+  const teamName = readOptionalString(channelConfig.teamName);
+  const apiBaseUrl = readOptionalString(channelConfig.apiBaseUrl);
+  const websocketUrl = options.websocketUrl ?? readOptionalString(channelConfig.websocketUrl);
+  const websocketHost = readOptionalString(channelConfig.websocketHost);
+  const websocketAppKey = readOptionalString(channelConfig.websocketAppKey);
+  const websocketAuthEndpoint = readOptionalString(channelConfig.websocketAuthEndpoint);
+  const websocketSubscriptions = readOptionalStringArray(channelConfig.websocketSubscriptions);
+  const websocketTeamId = readOptionalString(channelConfig.websocketTeamId);
+  const websocketTeamUserId = readOptionalString(channelConfig.websocketTeamUserId);
+  const websocketChannelIds = readOptionalStringArray(channelConfig.websocketChannelIds);
+  const ignoredUserIds = readOptionalStringArray(channelConfig.ignoredUserIds);
+  const ignoredUserNames = readOptionalStringArray(channelConfig.ignoredUserNames);
 
-  const websocketUrl = options.websocketUrl ?? resolveKchatWebSocketUrl(channelConfig);
-  const socket = new WebSocketImpl(websocketUrl);
-
-  return await new Promise((resolve, reject) => {
-    let settled = false;
-    let authenticated = false;
-    const cleanups = [];
-
-    const settle = (fn, value) => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      for (const cleanup of cleanups.splice(0)) {
-        cleanup();
-      }
-      options.abortSignal?.removeEventListener?.("abort", onAbort);
-      fn(value);
-    };
-
-    const handleFrame = (frame) => {
-      options.onFrame?.(frame);
-
-      if (isKchatWebSocketAuthReply(frame)) {
-        if (frame.status !== "OK") {
-          settle(reject, new Error("kChat WebSocket authentication failed."));
-          closeKchatWebSocket(socket);
-          return;
-        }
-
-        authenticated = true;
-        options.onAuthenticated?.();
-        return;
-      }
-
-      if (!authenticated && frame.event !== "hello") {
-        return;
-      }
-
-      dispatchKchatWebSocketEvent({
+  return await runLiquidKchatWebSocketConnection({
+    protocol: resolveKchatWebSocketProtocol(channelConfig),
+    token,
+    fetch: options.fetch,
+    webSocket: WebSocketImpl,
+    signal: options.abortSignal,
+    ...(teamName ? { teamName } : {}),
+    ...(apiBaseUrl ? { apiBaseUrl } : {}),
+    ...(websocketUrl ? { url: websocketUrl } : {}),
+    ...(websocketHost ? { host: websocketHost } : {}),
+    ...(websocketAppKey ? { appKey: websocketAppKey } : {}),
+    ...(websocketAuthEndpoint ? { authEndpoint: websocketAuthEndpoint } : {}),
+    ...(websocketSubscriptions ? { subscriptions: websocketSubscriptions } : {}),
+    ...(websocketTeamId ? { teamId: websocketTeamId } : {}),
+    ...(websocketTeamUserId ? { teamUserId: websocketTeamUserId } : {}),
+    ...(websocketChannelIds ? { channelIds: websocketChannelIds } : {}),
+    ...(ignoredUserIds ? { ignoredUserIds } : {}),
+    ...(ignoredUserNames ? { ignoredUserNames } : {}),
+    onFrame: options.onFrame,
+    onAuthenticated: options.onAuthenticated,
+    onSubscribed: options.onSubscribed,
+    onPost(event) {
+      options.onPost?.(event);
+      dispatchKchatWebSocketPostEvent({
         cfg: options.cfg,
         channelConfig,
         runtime: options.runtime,
-        frame,
+        event,
       })
         .then((result) => {
           options.onDispatchResult?.(result);
@@ -785,223 +775,27 @@ export async function runKchatWebSocketConnection(options = {}) {
         .catch((error) => {
           options.log?.error?.(`kChat WebSocket dispatch failed: ${error instanceof Error ? error.message : String(error)}`);
         });
-    };
-
-    const onOpen = () => {
-      socket.send(JSON.stringify(createKchatWebSocketAuthFrame(token)));
-    };
-    const onMessage = (event) => {
-      const frame = parseKchatWebSocketFrame(resolveKchatWebSocketMessageData(event));
-      if (frame) {
-        handleFrame(frame);
-      }
-    };
-    const onError = (event) => {
-      if (!authenticated) {
-        settle(reject, resolveKchatWebSocketError(event));
-      }
-    };
-    const onClose = () => {
-      settle(resolve, undefined);
-    };
-    const onAbort = () => {
-      closeKchatWebSocket(socket);
-      settle(resolve, undefined);
-    };
-
-    cleanups.push(addWebSocketListener(socket, "open", onOpen));
-    cleanups.push(addWebSocketListener(socket, "message", onMessage));
-    cleanups.push(addWebSocketListener(socket, "error", onError));
-    cleanups.push(addWebSocketListener(socket, "close", onClose));
-
-    if (options.abortSignal?.aborted) {
-      onAbort();
-      return;
-    }
-    options.abortSignal?.addEventListener?.("abort", onAbort, { once: true });
-  });
-}
-
-async function runKchatEchoWebSocketConnection(options = {}) {
-  const WebSocketImpl = options.WebSocketImpl ?? globalThis.WebSocket;
-  if (typeof WebSocketImpl !== "function") {
-    throw new Error("A WebSocket implementation is required for kChat WebSocket receive mode.");
-  }
-
-  const channelConfig = options.channelConfig ?? resolveKchatChannelConfig(options.cfg);
-  const token = options.token ?? readKchatBearerTokenFromEnv(channelConfig, options.env ?? globalThis.process?.env);
-  if (!token) {
-    throw new Error(`Set ${resolveKchatTokenEnvName(channelConfig)} in the environment before connecting to kChat WebSocket.`);
-  }
-
-  const websocketUrl = options.websocketUrl ?? resolveKchatWebSocketUrl(channelConfig);
-  const socket = new WebSocketImpl(websocketUrl);
-
-  return await new Promise((resolve, reject) => {
-    let settled = false;
-    let subscriptionsStarted = false;
-    const cleanups = [];
-
-    const settle = (fn, value) => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      for (const cleanup of cleanups.splice(0)) {
-        cleanup();
-      }
-      options.abortSignal?.removeEventListener?.("abort", onAbort);
-      fn(value);
-    };
-
-    const subscribe = async (socketId) => {
-      if (subscriptionsStarted) {
-        return;
-      }
-      subscriptionsStarted = true;
-
-      try {
-        const channelNames = await resolveKchatEchoSubscriptionChannels({
-          channelConfig,
-          token,
-          fetch: options.fetch,
-        });
-
-        for (const channelName of channelNames) {
-          const auth = await authorizeKchatEchoSubscription({
-            channelConfig,
-            token,
-            socketId,
-            channelName,
-            fetch: options.fetch,
-          });
-          socket.send(JSON.stringify(createKchatEchoSubscribeFrame(channelName, auth)));
-        }
-
-        options.onAuthenticated?.();
-      } catch (error) {
-        closeKchatWebSocket(socket);
-        settle(reject, error instanceof Error ? error : new Error(String(error)));
-      }
-    };
-
-    const handleFrame = (frame) => {
-      options.onFrame?.(frame);
-
-      if (frame.event === "pusher:connection_established") {
-        const data = parseKchatEchoFrameData(frame.data);
-        const socketId = readOptionalString(data?.socket_id);
-        if (!socketId) {
-          closeKchatWebSocket(socket);
-          settle(reject, new Error("kChat WebSocket connection did not return a socket id."));
-          return;
-        }
-
-        subscribe(socketId);
-        return;
-      }
-
-      if (frame.event === "pusher:ping") {
-        socket.send(JSON.stringify({ event: "pusher:pong", data: {} }));
-        return;
-      }
-
-      if (frame.event === "pusher:error") {
-        closeKchatWebSocket(socket);
-        settle(reject, new Error(readOptionalString(parseKchatEchoFrameData(frame.data)?.message) ?? "kChat WebSocket server returned an error."));
-        return;
-      }
-
-      if (frame.event === "pusher_internal:subscription_succeeded") {
-        options.onSubscribed?.(frame.channel);
-        return;
-      }
-
-      if (typeof frame.event === "string" && frame.event.startsWith("pusher:")) {
-        return;
-      }
-
-      dispatchKchatWebSocketEvent({
-        cfg: options.cfg,
-        channelConfig,
-        runtime: options.runtime,
-        frame,
-      })
-        .then((result) => {
-          options.onDispatchResult?.(result);
-        })
-        .catch((error) => {
-          options.log?.error?.(`kChat WebSocket dispatch failed: ${error instanceof Error ? error.message : String(error)}`);
-        });
-    };
-
-    const onMessage = (event) => {
-      const frame = parseKchatWebSocketFrame(resolveKchatWebSocketMessageData(event));
-      if (frame) {
-        handleFrame(frame);
-      }
-    };
-    const onError = (event) => {
-      settle(reject, resolveKchatWebSocketError(event));
-    };
-    const onClose = () => {
-      settle(resolve, undefined);
-    };
-    const onAbort = () => {
-      closeKchatWebSocket(socket);
-      settle(resolve, undefined);
-    };
-
-    cleanups.push(addWebSocketListener(socket, "message", onMessage));
-    cleanups.push(addWebSocketListener(socket, "error", onError));
-    cleanups.push(addWebSocketListener(socket, "close", onClose));
-
-    if (options.abortSignal?.aborted) {
-      onAbort();
-      return;
-    }
-    options.abortSignal?.addEventListener?.("abort", onAbort, { once: true });
-  });
-}
-
-export function createKchatWebSocketAuthFrame(token, seq = KCHAT_WEBSOCKET_AUTH_SEQ) {
-  return {
-    seq,
-    action: "authentication_challenge",
-    data: {
-      token,
     },
-  };
+  });
 }
+
+export const createKchatWebSocketAuthFrame = createLiquidKchatMattermostAuthFrame;
 
 export function resolveKchatWebSocketUrl(channelConfig) {
+  const teamName = readOptionalString(channelConfig.teamName);
+  const apiBaseUrl = readOptionalString(channelConfig.apiBaseUrl);
   const websocketUrl = readOptionalString(channelConfig.websocketUrl);
-  if (websocketUrl) {
-    return websocketUrl;
-  }
+  const websocketHost = readOptionalString(channelConfig.websocketHost);
+  const websocketAppKey = readOptionalString(channelConfig.websocketAppKey);
 
-  if (resolveKchatWebSocketProtocol(channelConfig) === "infomaniak-echo") {
-    const websocketHost = readOptionalString(channelConfig.websocketHost) ?? DEFAULT_KCHAT_ECHO_WEBSOCKET_HOST;
-    const appKey = readOptionalString(channelConfig.websocketAppKey) ?? DEFAULT_KCHAT_ECHO_APP_KEY;
-    const url = new URL(`wss://${websocketHost}/app/${encodeURIComponent(appKey)}`);
-    url.searchParams.set("protocol", "7");
-    url.searchParams.set("client", KCHAT_ECHO_CLIENT_NAME);
-    url.searchParams.set("version", KCHAT_ECHO_CLIENT_VERSION);
-    url.searchParams.set("flash", "false");
-    return url.toString();
-  }
-
-  const apiBaseUrl = resolveKchatApiBaseUrl(channelConfig);
-  if (!apiBaseUrl) {
-    throw new Error("Configure channels.kchat.apiBaseUrl or a DNS-safe channels.kchat.teamName before enabling kChat WebSocket receive mode.");
-  }
-
-  const url = new URL(apiBaseUrl);
-  url.protocol = url.protocol === "http:" ? "ws:" : "wss:";
-  url.pathname = "/api/v4/websocket";
-  url.search = "";
-  url.hash = "";
-  return url.toString();
+  return resolveLiquidKchatWebSocketUrl({
+    protocol: resolveKchatWebSocketProtocol(channelConfig),
+    ...(teamName ? { teamName } : {}),
+    ...(apiBaseUrl ? { apiBaseUrl } : {}),
+    ...(websocketUrl ? { url: websocketUrl } : {}),
+    ...(websocketHost ? { host: websocketHost } : {}),
+    ...(websocketAppKey ? { appKey: websocketAppKey } : {}),
+  });
 }
 
 export async function dispatchKchatWebSocketEvent({ cfg, channelConfig, runtime, frame }) {
@@ -1032,44 +826,56 @@ export async function dispatchKchatWebSocketEvent({ cfg, channelConfig, runtime,
   return { dispatched: true, inboundId: inbound.id };
 }
 
+export async function dispatchKchatWebSocketPostEvent({ cfg, channelConfig, runtime, event }) {
+  const payload = normalizeKchatWebSocketPostEventPayload(event, channelConfig);
+  if (!payload) {
+    return { dispatched: false, reason: "unsupported_event" };
+  }
+
+  if (!isAllowedKchatWebSocketChannel(payload, channelConfig)) {
+    return { dispatched: false, reason: "ignored_channel" };
+  }
+
+  if (shouldIgnoreKchatWebhookPayload(payload, channelConfig)) {
+    return { dispatched: false, reason: "ignored_sender" };
+  }
+
+  const inbound = normalizeKchatOutgoingWebhookPayload(payload);
+  if (!inbound) {
+    return { dispatched: false, reason: "invalid_payload" };
+  }
+
+  await dispatchKchatInboundWebhookEvent({
+    cfg,
+    channelConfig,
+    runtime,
+    inbound,
+  });
+  return { dispatched: true, inboundId: inbound.id };
+}
+
 export function normalizeKchatWebSocketPostEvent(frame, channelConfig = {}) {
-  if (!isRecord(frame) || frame.event !== "posted") {
+  const event = normalizeLiquidKchatWebSocketPostEvent(frame, {
+    ...(readOptionalString(channelConfig.teamName) ? { teamName: readOptionalString(channelConfig.teamName) } : {}),
+  });
+  return normalizeKchatWebSocketPostEventPayload(event, channelConfig);
+}
+
+function normalizeKchatWebSocketPostEventPayload(event, channelConfig = {}) {
+  if (!isRecord(event)) {
     return undefined;
   }
 
-  const data = parseKchatEchoFrameData(frame.data) ?? {};
-  const broadcast = isRecord(frame.broadcast) ? frame.broadcast : {};
-  const post = parseKchatWebSocketPost(data.post);
-  if (!post) {
-    return undefined;
-  }
-
-  const channelId = readOptionalString(post.channel_id) ?? readOptionalString(post.channelId) ?? readOptionalString(broadcast.channel_id);
-  const channelName =
-    readOptionalString(data.channel_name) ??
-    readOptionalString(data.channelName) ??
-    readOptionalString(data.channel_display_name) ??
-    readOptionalString(data.channelDisplayName);
-  const teamDomain =
-    readOptionalString(data.team_domain) ??
-    readOptionalString(data.teamDomain) ??
-    readOptionalString(data.team_name) ??
-    readOptionalString(channelConfig.teamName);
-  const teamId =
-    readOptionalString(post.team_id) ??
-    readOptionalString(post.teamId) ??
-    readOptionalString(data.team_id) ??
-    readOptionalString(broadcast.team_id);
-  const postId = readOptionalString(post.id) ?? readOptionalString(post.post_id);
-  const rootId = readOptionalString(post.root_id) ?? readOptionalString(post.rootId);
-  const userId = readOptionalString(post.user_id) ?? readOptionalString(post.userId);
-  const userName =
-    readOptionalString(data.sender_name) ??
-    readOptionalString(data.senderName) ??
-    readOptionalString(post.user_name) ??
-    readOptionalString(post.userName);
-  const text = readOptionalString(post.message) ?? readOptionalString(data.message);
-  const createAt = readOptionalNumber(post.create_at) ?? readOptionalNumber(post.createAt);
+  const channelId = readOptionalString(event.channelId);
+  const channelName = readOptionalString(event.channelName);
+  const teamDomain = readOptionalString(event.teamDomain) ?? readOptionalString(channelConfig.teamName);
+  const teamId = readOptionalString(event.teamId);
+  const postId = readOptionalString(event.postId) ?? readOptionalString(event.id);
+  const rootId = readOptionalString(event.rootId);
+  const userId = readOptionalString(event.userId);
+  const userName = readOptionalString(event.userName);
+  const text = readOptionalString(event.text);
+  const createAt = readOptionalNumber(event.timestamp);
 
   return {
     ...(channelId ? { channel_id: channelId } : {}),
@@ -1424,224 +1230,6 @@ function normalizeParsedKchatPayload(parsed) {
   return parsed;
 }
 
-function parseKchatWebSocketFrame(data) {
-  const text = readKchatWebSocketText(data);
-  if (!text) {
-    return undefined;
-  }
-
-  try {
-    const parsed = JSON.parse(text);
-    return isRecord(parsed) ? parsed : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-async function resolveKchatEchoSubscriptionChannels({ channelConfig, token, fetch }) {
-  const configuredSubscriptions = readOptionalStringArray(channelConfig.websocketSubscriptions);
-  if (configuredSubscriptions) {
-    return configuredSubscriptions;
-  }
-
-  const [teamId, teamUserId] = await Promise.all([
-    resolveKchatEchoTeamId({ channelConfig, token, fetch }),
-    resolveKchatEchoTeamUserId({ channelConfig, token, fetch }),
-  ]);
-  return [`private-team.${teamId}`, `presence-teamUser.${teamUserId}`];
-}
-
-async function resolveKchatEchoTeamId({ channelConfig, token, fetch }) {
-  const configuredTeamId = readOptionalString(channelConfig.websocketTeamId);
-  if (configuredTeamId) {
-    return configuredTeamId;
-  }
-
-  const teamName = readOptionalString(channelConfig.teamName);
-  if (!teamName) {
-    throw new Error("Configure channels.kchat.teamName, websocketTeamId, or websocketSubscriptions for kChat WebSocket receive mode.");
-  }
-
-  const baseUrl = resolveKchatApiBaseUrl(channelConfig);
-  const team = await fetchKchatJson({
-    url: `${baseUrl}/api/v4/teams/name/${encodeURIComponent(teamName)}`,
-    token,
-    fetch,
-  });
-  const teamId = readOptionalString(team.id);
-  if (!teamId) {
-    throw new Error(`kChat team lookup did not return an id for ${teamName}.`);
-  }
-
-  return teamId;
-}
-
-async function resolveKchatEchoTeamUserId({ channelConfig, token, fetch }) {
-  const configuredTeamUserId = readOptionalString(channelConfig.websocketTeamUserId);
-  if (configuredTeamUserId) {
-    return configuredTeamUserId;
-  }
-
-  const baseUrl = resolveKchatApiBaseUrl(channelConfig);
-  const user = await fetchKchatJson({
-    url: `${baseUrl}/api/v4/users/me`,
-    token,
-    fetch,
-  });
-  const userId = readOptionalString(user.id);
-  if (!userId) {
-    throw new Error("kChat current-user lookup did not return an id.");
-  }
-
-  return userId;
-}
-
-async function authorizeKchatEchoSubscription({ channelConfig, token, socketId, channelName, fetch }) {
-  const response = await fetchKchat({
-    url: resolveKchatEchoAuthEndpoint(channelConfig),
-    token,
-    fetch,
-    init: {
-      method: "POST",
-      headers: {
-        "content-type": "application/x-www-form-urlencoded",
-        accept: "application/json",
-      },
-      body: new URLSearchParams({
-        socket_id: socketId,
-        channel_name: channelName,
-      }),
-    },
-  });
-
-  if (!response.ok) {
-    throw new Error(`kChat WebSocket channel auth failed for ${channelName}: HTTP ${response.status}.`);
-  }
-
-  const auth = await response.json();
-  if (!isRecord(auth) || !readOptionalString(auth.auth)) {
-    throw new Error(`kChat WebSocket channel auth did not return a signature for ${channelName}.`);
-  }
-
-  return auth;
-}
-
-function resolveKchatEchoAuthEndpoint(channelConfig) {
-  const configuredEndpoint = readOptionalString(channelConfig.websocketAuthEndpoint);
-  if (configuredEndpoint) {
-    return configuredEndpoint;
-  }
-
-  const baseUrl = resolveKchatApiBaseUrl(channelConfig);
-  return `${baseUrl}/broadcasting/auth`;
-}
-
-function createKchatEchoSubscribeFrame(channelName, auth) {
-  return {
-    event: "pusher:subscribe",
-    data: {
-      channel: channelName,
-      auth: auth.auth,
-      ...(readOptionalString(auth.channel_data) ? { channel_data: auth.channel_data } : {}),
-    },
-  };
-}
-
-async function fetchKchatJson({ url, token, fetch }) {
-  const response = await fetchKchat({ url, token, fetch });
-  if (!response.ok) {
-    throw new Error(`kChat API request failed: HTTP ${response.status}.`);
-  }
-
-  const parsed = await response.json();
-  if (!isRecord(parsed)) {
-    throw new Error("kChat API response did not return a JSON object.");
-  }
-
-  return parsed;
-}
-
-async function fetchKchat({ url, token, fetch, init = {} }) {
-  const fetchImpl = fetch ?? globalThis.fetch;
-  if (typeof fetchImpl !== "function") {
-    throw new Error("A fetch implementation is required for kChat WebSocket receive mode.");
-  }
-
-  return await fetchImpl(url, {
-    ...init,
-    headers: {
-      ...init.headers,
-      Authorization: `Bearer ${token}`,
-    },
-  });
-}
-
-function parseKchatEchoFrameData(value) {
-  if (isRecord(value)) {
-    return value;
-  }
-
-  if (typeof value !== "string") {
-    return undefined;
-  }
-
-  try {
-    const parsed = JSON.parse(value);
-    return isRecord(parsed) ? parsed : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-function readKchatWebSocketText(data) {
-  if (typeof data === "string") {
-    return data;
-  }
-
-  if (data instanceof ArrayBuffer) {
-    return Buffer.from(data).toString("utf8");
-  }
-
-  if (ArrayBuffer.isView(data)) {
-    return Buffer.from(data.buffer, data.byteOffset, data.byteLength).toString("utf8");
-  }
-
-  if (typeof Buffer !== "undefined" && Buffer.isBuffer(data)) {
-    return data.toString("utf8");
-  }
-
-  return undefined;
-}
-
-function resolveKchatWebSocketMessageData(event) {
-  if (isRecord(event) && "data" in event) {
-    return event.data;
-  }
-
-  return event;
-}
-
-function parseKchatWebSocketPost(value) {
-  if (isRecord(value)) {
-    return value;
-  }
-
-  if (typeof value !== "string") {
-    return undefined;
-  }
-
-  try {
-    const parsed = JSON.parse(value);
-    return isRecord(parsed) ? parsed : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-function isKchatWebSocketAuthReply(frame) {
-  return isRecord(frame) && readOptionalNumber(frame.seq_reply) === KCHAT_WEBSOCKET_AUTH_SEQ && typeof frame.status === "string";
-}
-
 function isAllowedKchatWebSocketChannel(payload, channelConfig) {
   const allowedChannelIds = readOptionalStringArray(channelConfig.websocketChannelIds) ?? [];
   if (allowedChannelIds.length === 0) {
@@ -1650,48 +1238,6 @@ function isAllowedKchatWebSocketChannel(payload, channelConfig) {
 
   const channelId = readOptionalString(payload.channel_id) ?? readOptionalString(payload.channelId);
   return Boolean(channelId && allowedChannelIds.includes(channelId));
-}
-
-function addWebSocketListener(socket, eventName, handler) {
-  if (typeof socket.addEventListener === "function") {
-    socket.addEventListener(eventName, handler);
-    return () => socket.removeEventListener?.(eventName, handler);
-  }
-
-  if (typeof socket.on === "function") {
-    socket.on(eventName, handler);
-    return () => {
-      if (typeof socket.off === "function") {
-        socket.off(eventName, handler);
-      } else if (typeof socket.removeListener === "function") {
-        socket.removeListener(eventName, handler);
-      }
-    };
-  }
-
-  const propertyName = `on${eventName}`;
-  const previous = socket[propertyName];
-  socket[propertyName] = handler;
-  return () => {
-    if (socket[propertyName] === handler) {
-      socket[propertyName] = previous;
-    }
-  };
-}
-
-function closeKchatWebSocket(socket) {
-  if (typeof socket.close === "function") {
-    socket.close();
-  }
-}
-
-function resolveKchatWebSocketError(event) {
-  if (event instanceof Error) {
-    return event;
-  }
-
-  const message = readOptionalString(event?.message) ?? readOptionalString(event?.error?.message) ?? "kChat WebSocket connection failed.";
-  return new Error(message);
 }
 
 async function sleepWithAbort(ms, abortSignal) {

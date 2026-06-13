@@ -49,7 +49,7 @@
     "test": "node --test test/*.test.js"
   },
   "dependencies": {
-    "liquid-potassium": "0.2.0"
+    "liquid-potassium": "0.3.0"
   },
   "peerDependencies": {
     "openclaw": ">=2026.6.6"

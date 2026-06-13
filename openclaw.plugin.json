@@ -244,7 +244,7 @@
         },
         "websocketUrl": {
           "label": "WebSocket URL",
-          "placeholder": "wss://websocket.kchat.infomaniak.com/app/kchat-key?protocol=7&client=potassium-openclaw&version=0.2.0&flash=false"
+          "placeholder": "wss://websocket.kchat.infomaniak.com/app/kchat-key?protocol=7&client=liquid-potassium&version=0.3.0&flash=false"
         },
         "websocketHost": {
           "label": "WebSocket host",
