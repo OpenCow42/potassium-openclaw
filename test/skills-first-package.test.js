@@ -48,6 +48,7 @@ test("package declares a native OpenClaw plugin backed by the published liquid-p
   assert.equal(nativeManifest.name, "Potassium");
   assert.deepEqual(nativeManifest.skills, ["./skills"]);
   assert.deepEqual(nativeManifest.contracts?.tools, expectedToolNames);
+  assert.equal("token" in nativeManifest.configSchema?.properties, false);
   assert.equal(nativeManifest.configSchema?.properties?.tokenEnvName?.default, "INFOMANIAK_TOKEN");
   assert.equal(nativeManifest.configSchema?.properties?.blockMutating?.default, true);
   assert.deepEqual(nativeManifest.setup?.providers?.[0]?.envVars, ["INFOMANIAK_TOKEN"]);
@@ -61,8 +62,11 @@ test("package declares a native OpenClaw plugin backed by the published liquid-p
 });
 
 test("runtime entry registers exactly the manifest tool contracts", async () => {
-  const plugin = (await import(pathToFileURL(join(repositoryRoot, "index.js")).href)).default;
+  const pluginModule = await import(pathToFileURL(join(repositoryRoot, "index.js")).href);
+  const plugin = pluginModule.default;
   const registeredTools = [];
+
+  assert.equal("token" in pluginModule.PotassiumPluginConfigJsonSchema.properties, false);
 
   plugin.register({
     pluginConfig: { allowedDomains: ["kdrive"], tokenEnvName: "INFOMANIAK_TOKEN" },
@@ -75,6 +79,19 @@ test("runtime entry registers exactly the manifest tool contracts", async () => 
   assert.equal(plugin.name, "Potassium");
   assert.deepEqual(registeredTools.map((tool) => tool.name), expectedToolNames);
   assert.ok(registeredTools.every((tool) => tool.label && tool.description && tool.parameters));
+});
+
+test("runtime entry rejects direct bearer-token config", async () => {
+  const plugin = (await import(pathToFileURL(join(repositoryRoot, "index.js")).href)).default;
+
+  assert.throws(
+    () =>
+      plugin.register({
+        pluginConfig: { token: "placeholder" },
+        registerTool() {},
+      }),
+    /Direct Infomaniak token config is disabled/,
+  );
 });
 
 test("shipped JavaScript files do not import process-spawning APIs", async () => {

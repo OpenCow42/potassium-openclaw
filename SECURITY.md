@@ -12,6 +12,7 @@ Report vulnerabilities privately to the repository owner before opening a public
 
 - Never store or print Infomaniak bearer tokens.
 - Keep Infomaniak credentials in `INFOMANIAK_TOKEN` or the configured `tokenEnvName`.
+- Direct bearer-token plugin config is disabled by this adapter.
 - Do not ask users to paste bearer tokens into chat.
 - Do not include token values in tests, docs, fixtures, logs, filenames, or tool-result summaries.
 
