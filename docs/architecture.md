@@ -2,36 +2,37 @@
 
 ## Boundary
 
-Potassium is the system of record for Infomaniak behavior. This package is a thin OpenClaw skills adapter that:
+This repository is the OpenClaw integration layer for Infomaniak workflows. It owns:
 
-- declares the prebuilt Potassium `pot` binary as a skill requirement,
-- declares `INFOMANIAK_TOKEN` as the required credential environment variable,
-- teaches agents to run `pot` through OpenClaw's managed `exec` tool,
-- keeps binary execution behind OpenClaw exec policy, allowlists, approvals, sandboxing, and elevated-mode controls,
-- avoids native plugin process spawning.
+- the native OpenClaw plugin entrypoint;
+- manifest metadata and tool contracts;
+- skill guidance for agents;
+- conservative mutation and credential rules;
+- the pinned dependency on `liquid-potassium`.
 
-This repository does not compile Swift, vendor Potassium, register native OpenClaw tools, or import Node process-spawning APIs.
+The reusable API client, catalog, discovery logic, Mail application client, and reviewed domain workflows live in `liquid-potassium`.
 
-## Release Direction
+This repository does not vendor Infomaniak API source, compile native code, or spawn host commands for API work.
 
-1. Potassium publishes signed or checksummed binary artifacts whose executable is named `pot` through [OpenCow42/tool-releases](https://github.com/OpenCow42/tool-releases).
-2. Homebrew installs those prebuilt artifacts through [OpenCow42/homebrew-tap](https://github.com/OpenCow42/homebrew-tap), and Debian-family systems can use [OpenCow42/apt-repo](https://github.com/OpenCow42/apt-repo).
-3. This OpenClaw integration is distributed as a Codex-compatible bundle through ClawHub, git, or archives.
-4. The bundled skills use documented OpenClaw skill metadata: top-level `homepage`, `metadata.openclaw.requires.bins`, `requires.env`, `primaryEnv`, and a Homebrew installer hint.
-5. Operators allow `pot` through OpenClaw exec approvals, either by bare command name or by resolved absolute path.
-6. The bundled skills teach the agent when and how to use `pot` through managed `exec`.
+## Runtime Flow
 
-See [Pot Installation Strategy](pot-installation-strategy.md) for the package-manager and execution boundary.
+1. OpenClaw loads `index.js` through `package.json#openclaw.extensions`.
+2. `index.js` builds the plugin config schema from `liquid-potassium/openclaw/tools`.
+3. At registration time, the plugin resolves config and registers the `infomaniak_*` tools created by `liquid-potassium`.
+4. Tool calls use the SDK's injected `fetch`, `client.workflows`, discovery helpers, Mail application client, or raw operation dispatcher.
+5. Credentials are read from `INFOMANIAK_TOKEN` by default, or from the configured `tokenEnvName`.
 
 ## Mutation Policy
 
-Mutations are controlled by user intent plus OpenClaw exec policy. The skills treat create, update, delete, upload, move, send, schedule, share, and similar commands as mutations and instruct agents to run them only when explicitly requested.
+Mutations are controlled by plugin policy plus explicit user intent.
 
-At the host boundary, operators should keep `pot` behind OpenClaw exec approvals. A strict local setup is:
+- `blockMutating` defaults to `true`.
+- Mutating workflow, Mail application, and raw operation calls require `confirm_mutating=true` when mutation is allowed.
+- Domain and operation allow/deny policy applies before the SDK call is made.
+- Skills must not encourage hidden writes, guessed IDs, or fallback raw calls when a reviewed workflow exists.
 
-```sh
-openclaw exec-policy set --security allowlist --ask on-miss --ask-fallback deny
-openclaw approvals allowlist add "pot"
-```
+## Dependency Strategy
 
-Use an absolute allowlist path when the operator wants to trust only one installed binary.
+Until `liquid-potassium` is published to npm, this package depends on a specific GitHub commit. The pinned commit includes built `dist` output because OpenClaw git installs use npm with lifecycle scripts disabled.
+
+See [Liquid Potassium Integration](liquid-potassium-integration.md) for details.

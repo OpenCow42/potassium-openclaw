@@ -1,0 +1,83 @@
+{
+  "id": "potassium",
+  "activation": {
+    "onStartup": false
+  },
+  "name": "Potassium",
+  "description": "Infomaniak OpenClaw tools backed by the liquid-potassium Node SDK.",
+  "skills": [
+    "./skills"
+  ],
+  "setup": {
+    "providers": [
+      {
+        "id": "infomaniak",
+        "envVars": [
+          "INFOMANIAK_TOKEN"
+        ]
+      }
+    ]
+  },
+  "contracts": {
+    "tools": [
+      "infomaniak_domains",
+      "infomaniak_search",
+      "infomaniak_describe",
+      "infomaniak_discover",
+      "infomaniak_mail_application",
+      "infomaniak_workflow_list",
+      "infomaniak_workflow_describe",
+      "infomaniak_workflow_run",
+      "infomaniak_call"
+    ]
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "token": {
+        "type": "string",
+        "description": "Infomaniak API bearer token."
+      },
+      "tokenEnvName": {
+        "type": "string",
+        "default": "INFOMANIAK_TOKEN",
+        "description": "Environment variable name used for the Infomaniak API bearer token when token is not configured directly."
+      },
+      "baseUrl": {
+        "type": "string",
+        "description": "Infomaniak API base URL. Defaults to https://api.infomaniak.com."
+      },
+      "mailApplicationBaseUrl": {
+        "type": "string",
+        "description": "Infomaniak Mail application API base URL. Defaults to https://mail.infomaniak.com."
+      },
+      "allowedDomains": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Optional domain allowlist such as kdrive, mail, or kchat."
+      },
+      "allowedOperations": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Optional normalized operation ID allowlist."
+      },
+      "deniedOperations": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Optional normalized operation ID denylist."
+      },
+      "blockMutating": {
+        "type": "boolean",
+        "default": true,
+        "description": "When true, mutating operations are blocked even if requested explicitly."
+      }
+    }
+  }
+}

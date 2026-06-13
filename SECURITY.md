@@ -1,18 +1,22 @@
 # Security Policy
 
-## Supported Branches
+## Supported Versions
 
-Security fixes are handled on `main`.
+Security fixes target the current `0.1.x` development line until this package has a broader release policy.
 
-## Reporting Vulnerabilities
+## Reporting a Vulnerability
 
-Please report security vulnerabilities privately through GitHub Security Advisories if they are enabled for this repository. If advisories are not available, contact the repository owner through GitHub before opening a public issue.
+Report vulnerabilities privately to the repository owner before opening a public issue.
 
-Do not include Infomaniak bearer tokens, live credentials, or private account data in public issues, pull requests, logs, screenshots, or test fixtures.
+## Credential Handling
 
-## Project Security Expectations
+- Never store or print Infomaniak bearer tokens.
+- Keep Infomaniak credentials in `INFOMANIAK_TOKEN` or the configured `tokenEnvName`.
+- Do not ask users to paste bearer tokens into chat.
+- Do not include token values in tests, docs, fixtures, logs, filenames, or tool-result summaries.
 
-- Keep Infomaniak credentials in `INFOMANIAK_TOKEN` or the configured `tokenEnvName`; never pass `--token` to `pot`.
-- Keep mutation tools disabled by default and covered by tests before enabling them in any environment.
-- Use fake `pot` binaries in the default test suite; do not call live Infomaniak APIs from CI.
-- Treat `pot` as a prebuilt executable discovered on `PATH` or configured through `potPath`.
+## Test Boundary
+
+- Default tests must not call live Infomaniak APIs.
+- Use mocked plugin registration and metadata checks.
+- Keep mutation tools blocked by default and covered by tests.
