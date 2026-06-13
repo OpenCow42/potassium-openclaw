@@ -2,5 +2,36 @@
   "name": "potassium",
   "version": "0.1.0",
   "description": "OpenClaw Infomaniak tools and skills backed by the liquid-potassium Node SDK.",
-  "skills": ["./skills"]
+  "author": {
+    "name": "OpenCow",
+    "url": "https://github.com/OpenCow42"
+  },
+  "homepage": "https://github.com/OpenCow42/potassium-openclaw#readme",
+  "repository": "https://github.com/OpenCow42/potassium-openclaw",
+  "license": "Apache-2.0",
+  "keywords": [
+    "infomaniak",
+    "kchat",
+    "kdrive",
+    "openclaw",
+    "potassium"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Potassium",
+    "shortDescription": "Use Infomaniak tools in OpenClaw.",
+    "longDescription": "Potassium adds native OpenClaw tools and skills for Infomaniak kDrive, Mail, kChat, URL shortener, and discovery workflows.",
+    "developerName": "OpenCow",
+    "category": "Productivity",
+    "capabilities": [
+      "Tools",
+      "Productivity"
+    ],
+    "websiteURL": "https://github.com/OpenCow42/potassium-openclaw",
+    "defaultPrompt": [
+      "List my available Infomaniak workflows.",
+      "Find recent Infomaniak Mail threads.",
+      "Create an Infomaniak kChat post."
+    ]
+  }
 }
