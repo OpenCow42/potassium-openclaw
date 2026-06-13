@@ -1,41 +1,41 @@
 ---
 name: potassium
-description: Use the prebuilt Potassium CLI command pot for supported service workflows, including Infomaniak services.
-homepage: https://github.com/OpenCow42/tool-releases
+description: Use Potassium's OpenClaw Infomaniak tools backed by the liquid-potassium Node SDK. Trigger for Infomaniak kDrive, kChat, Mail, URL shortener, discovery, and other supported Infomaniak service workflows.
+homepage: https://github.com/OpenCow42/potassium-openclaw
 user-invocable: true
-metadata: {"openclaw":{"requires":{"bins":["pot"],"env":["INFOMANIAK_TOKEN"]},"primaryEnv":"INFOMANIAK_TOKEN","install":[{"id":"brew-potassium","kind":"brew","formula":"opencow42/tap/potassium","bins":["pot"],"label":"Install Potassium CLI (brew)"}]}}
+metadata: {"openclaw":{"requires":{"config":["plugins.entries.potassium.enabled"],"env":["INFOMANIAK_TOKEN"]},"primaryEnv":"INFOMANIAK_TOKEN"}}
 ---
 
 # Potassium
 
-Use this skill when the user asks to inspect or manage Infomaniak services such as kDrive, kChat, Mail, or URL shortener.
+Use this skill when the user asks to inspect or manage Infomaniak services such as kDrive, kChat, Mail, URL shortener, Newsletter, Public Cloud, video, VOD, radio, domains, account, profile, AI, kMeet, Swiss Backup, eTickets, or core resources.
 
-Use OpenClaw's managed `exec` tool to run the prebuilt `pot` command. This package intentionally does not ship native plugin tools that spawn processes; command execution must stay behind OpenClaw exec policy, allowlists, approvals, sandboxing, and elevated-mode controls.
+The plugin registers native OpenClaw tools through the `liquid-potassium` Node SDK. Do not invoke external binaries or shell commands for Infomaniak API work.
 
-Command rules:
+## Tool Workflow
 
-- Run `pot` as the executable on `PATH`; do not use a checked-in binary or a downloaded path from this package.
-- Use one `pot` invocation per `exec` call. Avoid shell chains, pipes, redirections, or inline scripts.
-- Prefer `--format json` so results can be summarized safely.
-- Discover available commands with `pot --help` or `pot <namespace> --help` when unsure.
-- If OpenClaw blocks the command, explain that the operator must install `pot` and allowlist it through exec approvals.
+1. Use `infomaniak_domains` when plugin policy or available domains are unclear.
+2. Prefer `infomaniak_workflow_list` and `infomaniak_workflow_describe` for reviewed SDK workflow actions.
+3. Use `infomaniak_workflow_run` when a reviewed workflow action fits the task.
+4. Use `infomaniak_mail_application` for mailbox consumption and mail draft/message actions.
+5. Use `infomaniak_search`, `infomaniak_describe`, `infomaniak_discover`, and `infomaniak_call` only when no reviewed workflow action fits.
 
-Credential rules:
+## Credentials
 
 - Do not ask the user to paste an Infomaniak bearer token into chat.
-- Do not pass `--token` to `pot`.
-- Rely on `INFOMANIAK_TOKEN` in the OpenClaw execution environment.
-- Do not include token values in summaries, logs, filenames, or error messages.
+- Do not include token values in summaries, logs, filenames, tool input echoes, or error messages.
+- Rely on `INFOMANIAK_TOKEN` by default, or the configured `tokenEnvName`.
+- Use plugin config allowlists and denylists as policy, not as suggestions.
 
-Output rules:
+## Mutations
 
-- Request JSON output unless the user explicitly needs human-readable text.
-- For file downloads or exports, require an explicit user-approved output path.
-- Summarize results in natural language after `exec` returns; do not expose large raw JSON unless the user asks.
+- Treat create, update, delete, upload, move, copy, trash, restore, send, schedule, share, and similar actions as mutations.
+- Run mutations only when the user explicitly requested the change and the parameters are clear.
+- Set `confirm_mutating=true` only for explicit mutating intent.
+- If the plugin blocks mutation, explain that plugin policy prevents the call.
 
-Mutation rules:
+## Results
 
-- Treat create, update, delete, upload, move, copy, trash, restore, send, schedule, alias, forwarding, category, comment, share-link, and Dropbox commands as mutations.
-- Perform mutations only when the user explicitly requested the change.
-- Confirm destructive or irreversible mutations unless the user already made the exact action clear.
-- If mutation execution is blocked, explain that OpenClaw exec policy or the host allowlist must approve the `pot` command.
+- Summarize useful identifiers, names, URLs, status, and follow-up choices.
+- Do not dump large JSON responses unless the user asks for raw details.
+- For file uploads, use absolute local paths in `file_path`.

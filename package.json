@@ -1,20 +1,61 @@
 {
   "name": "@opencow/potassium-openclaw",
   "version": "0.1.0",
-  "private": true,
   "type": "module",
-  "description": "OpenClaw skills for the prebuilt Potassium CLI (`pot`).",
+  "description": "OpenClaw Infomaniak tools and skills backed by the liquid-potassium Node SDK.",
+  "license": "Apache-2.0",
+  "author": "OpenCow",
+  "homepage": "https://github.com/OpenCow42/potassium-openclaw#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/OpenCow42/potassium-openclaw.git"
+  },
+  "bugs": {
+    "url": "https://github.com/OpenCow42/potassium-openclaw/issues"
+  },
+  "keywords": [
+    "codex-plugin",
+    "infomaniak",
+    "kchat",
+    "kdrive",
+    "openclaw",
+    "potassium",
+    "skills"
+  ],
+  "main": "./index.js",
+  "exports": {
+    ".": "./index.js"
+  },
+  "openclaw": {
+    "extensions": [
+      "./index.js"
+    ]
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "files": [
     ".codex-plugin",
+    "openclaw.plugin.json",
+    "index.js",
     "README.md",
+    "LICENSE",
     "SECURITY.md",
     "docs",
     "skills"
   ],
   "scripts": {
-    "check": "node --check test/skill-metadata.test.js && node --check test/skills-first-package.test.js",
-    "doctor": "pot version",
+    "check": "node --check index.js && node --check test/skill-metadata.test.js && node --check test/skills-first-package.test.js",
     "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "liquid-potassium": "github:OpenCow42/liquidPotassium#28450a310eeed5ffb18e05e9a93f60be506260b8"
+  },
+  "peerDependencies": {
+    "openclaw": ">=2026.6.6"
+  },
+  "devDependencies": {
+    "openclaw": "^2026.6.6"
   },
   "engines": {
     "node": ">=22"

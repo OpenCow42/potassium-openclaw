@@ -5,10 +5,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 const skillsRoot = fileURLToPath(new URL("../skills/", import.meta.url));
-const allowedOpenClawMetadataKeys = new Set(["requires", "primaryEnv", "install"]);
-const allowedInstallerKinds = new Set(["brew", "node", "go", "uv", "download"]);
+const allowedOpenClawMetadataKeys = new Set(["requires", "primaryEnv"]);
 
-test("bundled skills follow documented OpenClaw skill metadata", async () => {
+test("bundled skills target the native Potassium plugin tools", async () => {
   const skillFiles = await listSkillFiles();
 
   assert.ok(skillFiles.length > 0, "expected bundled skills");
@@ -20,39 +19,22 @@ test("bundled skills follow documented OpenClaw skill metadata", async () => {
 
     assert.equal(findFrontmatterValue(frontmatter, "name"), skillName, `${skillName} frontmatter name must match directory`);
     assert.notEqual(skillName, "infomaniak", "bundle must not expose Infomaniak as a skill/tool name");
+    assert.equal(findFrontmatterValue(frontmatter, "homepage"), "https://github.com/OpenCow42/potassium-openclaw");
 
-    assert.equal(
-      findFrontmatterValue(frontmatter, "homepage"),
-      "https://github.com/OpenCow42/tool-releases",
-      `${skillName} must expose the Potassium releases homepage`,
-    );
-
-    assert.deepEqual(metadata.requires?.bins, ["pot"], `${skillName} must require pot`);
+    assert.deepEqual(metadata.requires?.config, ["plugins.entries.potassium.enabled"], `${skillName} must require the potassium plugin entry`);
     assert.ok(metadata.requires?.env?.includes("INFOMANIAK_TOKEN"), `${skillName} must require INFOMANIAK_TOKEN`);
     assert.equal(metadata.primaryEnv, "INFOMANIAK_TOKEN", `${skillName} must declare primaryEnv`);
+    assert.equal(metadata.requires?.bins, undefined, `${skillName} must not require host binaries`);
+    assert.equal(metadata.install, undefined, `${skillName} must not declare binary installer hints`);
     assert.deepEqual(
       Object.keys(metadata).sort(),
       [...allowedOpenClawMetadataKeys].sort(),
-      `${skillName} must use only documented metadata.openclaw keys`,
+      `${skillName} must use only documented metadata.openclaw keys for the native plugin`,
     );
 
-    for (const install of metadata.install ?? []) {
-      assert.ok(
-        allowedInstallerKinds.has(install.kind),
-        `${skillName} installer ${install.id ?? "<unnamed>"} must use a documented installer kind`,
-      );
-      assert.notEqual(install.kind, "apt", `${skillName} must keep APT as operator docs, not installer metadata`);
-    }
-
-    assert.ok(
-      metadata.install?.some(
-        (install) =>
-          install.kind === "brew" &&
-          install.formula === "opencow42/tap/potassium" &&
-          install.bins?.includes("pot"),
-      ),
-      `${skillName} must expose the Potassium Homebrew installer hint`,
-    );
+    assert.equal(markdown.includes("managed `exec`"), false, `${skillName} must not teach managed exec for Infomaniak API work`);
+    assert.equal(markdown.includes("`pot`"), false, `${skillName} must not reference an external command`);
+    assert.match(markdown, /infomaniak_(workflow|mail|search|describe|discover|call|domains)/, `${skillName} must reference registered Infomaniak tools`);
   }
 });
 
