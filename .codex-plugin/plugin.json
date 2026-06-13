@@ -1,6 +1,6 @@
 {
   "name": "potassium",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "OpenClaw Infomaniak tools and skills backed by the liquid-potassium Node SDK.",
   "author": {
     "name": "OpenCow",
