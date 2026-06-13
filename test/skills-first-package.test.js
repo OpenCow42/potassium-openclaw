@@ -53,7 +53,11 @@ test("package declares a native OpenClaw plugin backed by the published liquid-p
   assert.deepEqual(nativeManifest.setup?.providers?.[0]?.envVars, ["INFOMANIAK_TOKEN"]);
 
   assert.equal(codexManifest.name, "potassium");
-  assert.deepEqual(codexManifest.skills, ["./skills"]);
+  assert.equal(codexManifest.license, "Apache-2.0");
+  assert.equal(codexManifest.repository, "https://github.com/OpenCow42/potassium-openclaw");
+  assert.equal(codexManifest.author?.name, "OpenCow");
+  assert.equal(codexManifest.skills, "./skills/");
+  assert.equal(codexManifest.interface?.displayName, "Potassium");
 });
 
 test("runtime entry registers exactly the manifest tool contracts", async () => {

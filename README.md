@@ -4,6 +4,10 @@ OpenClaw plugin and skills for Infomaniak workflows backed by the `liquid-potass
 
 This package no longer depends on an external executable. It registers native OpenClaw tools from `liquid-potassium` and ships skills that teach agents when to use those tools.
 
+## License
+
+This project is licensed under [Apache-2.0](LICENSE).
+
 ## Shape
 
 - `index.js` registers the OpenClaw plugin and delegates tool construction to `liquid-potassium`.
@@ -60,19 +64,76 @@ Do not place bearer tokens in chat, docs, tests, or committed config.
 
 ## Install in OpenClaw
 
-From a local checkout:
+The package is not published to npm or ClawHub yet. Install it from a local checkout while developing, or from a pinned GitHub commit for regular use.
+
+### 1. Prepare Credentials
+
+Create an Infomaniak API token with the product scopes needed for the workflows you want to use, then expose it to the OpenClaw process:
+
+```sh
+export INFOMANIAK_TOKEN="..."
+```
+
+Keep the token out of chat, docs, committed config, and shell history. If OpenClaw runs as a long-lived service, make sure `INFOMANIAK_TOKEN` is present in that service environment before starting or restarting it.
+
+### 2. Install The Plugin
+
+From this repository checkout:
 
 ```sh
 openclaw plugins install --link .
 ```
 
-From GitHub:
+From GitHub, pin a reviewed commit:
 
 ```sh
-openclaw plugins install git:github.com/OpenCow42/potassium-openclaw@<commit>
+openclaw plugins install git:github.com/OpenCow42/potassium-openclaw@<commit-sha>
 ```
 
-Enable and configure the plugin through OpenClaw's normal plugin configuration flow.
+Use `--force` with the same install command when replacing an existing install.
+
+### 3. Enable And Configure
+
+Enable the plugin:
+
+```sh
+openclaw plugins enable potassium
+```
+
+The default configuration reads `INFOMANIAK_TOKEN`, keeps mutating operations blocked, and leaves all supported domains available. To make those defaults explicit or to add policy constraints, patch OpenClaw config:
+
+```sh
+openclaw config patch --stdin <<'JSON5'
+{
+  plugins: {
+    entries: {
+      potassium: {
+        enabled: true,
+        config: {
+          tokenEnvName: "INFOMANIAK_TOKEN",
+          blockMutating: true,
+          allowedDomains: ["kdrive", "mail", "kchat", "urlShortener"]
+        }
+      }
+    }
+  }
+}
+JSON5
+```
+
+Omit `allowedDomains` to allow every supported Infomaniak domain. Keep `blockMutating: true` unless you intentionally want write-capable tools available; mutating tool calls still require explicit confirmation from the caller.
+
+### 4. Verify Setup
+
+Check the installed plugin and runtime registration:
+
+```sh
+openclaw plugins inspect potassium --runtime --json
+openclaw plugins list --enabled
+openclaw doctor
+```
+
+After verification, ask OpenClaw to use the Potassium skills for an Infomaniak task. The plugin should register the `infomaniak_*` tools listed above.
 
 ## Local Development
 
