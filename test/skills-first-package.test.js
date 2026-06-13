@@ -64,6 +64,8 @@ test("package declares a native OpenClaw plugin backed by the published liquid-p
   assert.equal(nativeManifest.channelConfigs?.kchat?.schema?.properties?.apiBaseUrl?.type, "string");
   assert.equal(nativeManifest.channelConfigs?.kchat?.schema?.properties?.defaultChannel?.type, "string");
   assert.equal(nativeManifest.channelConfigs?.kchat?.schema?.properties?.setOnline?.type, "boolean");
+  assert.equal(nativeManifest.channelConfigs?.kchat?.schema?.properties?.receiveMode?.default, "webhook");
+  assert.equal(nativeManifest.channelConfigs?.kchat?.schema?.properties?.websocketProtocol?.default, "infomaniak-echo");
   assert.equal(nativeManifest.channelConfigs?.kchat?.schema?.properties?.webhookPath?.default, "/channels/kchat/webhook");
   assert.equal(
     nativeManifest.channelConfigs?.kchat?.schema?.properties?.outgoingWebhookTokenEnvName?.default,
@@ -71,6 +73,14 @@ test("package declares a native OpenClaw plugin backed by the published liquid-p
   );
   assert.equal(nativeManifest.channelConfigs?.kchat?.schema?.properties?.ignoredUserIds?.items?.type, "string");
   assert.equal(nativeManifest.channelConfigs?.kchat?.schema?.properties?.ignoredUserNames?.items?.type, "string");
+  assert.equal(nativeManifest.channelConfigs?.kchat?.schema?.properties?.websocketUrl?.type, "string");
+  assert.equal(nativeManifest.channelConfigs?.kchat?.schema?.properties?.websocketHost?.default, "websocket.kchat.infomaniak.com");
+  assert.equal(nativeManifest.channelConfigs?.kchat?.schema?.properties?.websocketAppKey?.default, "kchat-key");
+  assert.equal(nativeManifest.channelConfigs?.kchat?.schema?.properties?.websocketAuthEndpoint?.type, "string");
+  assert.equal(nativeManifest.channelConfigs?.kchat?.schema?.properties?.websocketSubscriptions?.items?.type, "string");
+  assert.equal(nativeManifest.channelConfigs?.kchat?.schema?.properties?.websocketTeamId?.type, "string");
+  assert.equal(nativeManifest.channelConfigs?.kchat?.schema?.properties?.websocketTeamUserId?.type, "string");
+  assert.equal(nativeManifest.channelConfigs?.kchat?.schema?.properties?.websocketChannelIds?.items?.type, "string");
 
   assert.equal(codexManifest.name, "potassium");
   assert.equal(codexManifest.license, "Apache-2.0");
@@ -122,6 +132,7 @@ test("runtime entry registers exactly the manifest tool contracts", async () => 
   });
   assert.equal(kchatChannel.outbound?.deliveryMode, "direct");
   assert.equal(kchatChannel.outbound?.sendText instanceof Function, true);
+  assert.equal(kchatChannel.gateway?.startAccount instanceof Function, true);
   assert.equal(kchatChannel.config.hasConfiguredState({ cfg: {}, env: { INFOMANIAK_TOKEN: "placeholder" } }), true);
   assert.equal(kchatChannel.config.hasConfiguredState({ cfg: {}, env: {} }), false);
   assert.deepEqual(
@@ -129,6 +140,23 @@ test("runtime entry registers exactly the manifest tool contracts", async () => 
     [{ path: "/channels/kchat/webhook", auth: "plugin", match: "exact" }],
   );
   assert.equal(registeredRoutes[0]?.handler instanceof Function, true);
+});
+
+test("runtime entry skips the webhook route when kChat receiveMode is websocket", async () => {
+  const plugin = (await import(pathToFileURL(join(repositoryRoot, "index.js")).href)).default;
+  const registeredRoutes = [];
+
+  plugin.register({
+    pluginConfig: { allowedDomains: ["kchat"], tokenEnvName: "INFOMANIAK_TOKEN" },
+    config: { channels: { kchat: { enabled: true, receiveMode: "websocket" } } },
+    registerChannel() {},
+    registerHttpRoute(route) {
+      registeredRoutes.push(route);
+    },
+    registerTool() {},
+  });
+
+  assert.deepEqual(registeredRoutes, []);
 });
 
 test("kChat outbound sends directly to id: destinations without channel lookup", async () => {
@@ -482,6 +510,261 @@ test("kChat inbound normalization preserves thread context and redacts tokens", 
   assert.equal(normalized.raw.token, "[redacted]");
 });
 
+test("kChat WebSocket helpers derive URLs and normalize posted events", async () => {
+  const {
+    createKchatWebSocketAuthFrame,
+    dispatchKchatWebSocketEvent,
+    normalizeKchatWebSocketPostEvent,
+    resolveKchatWebSocketUrl,
+  } = await import(pathToFileURL(join(repositoryRoot, "index.js")).href);
+  const inboundRuns = [];
+
+  assert.equal(
+    resolveKchatWebSocketUrl({ teamName: "main-team" }),
+    "wss://websocket.kchat.infomaniak.com/app/kchat-key?protocol=7&client=potassium-openclaw&version=0.2.0&flash=false",
+  );
+  assert.equal(
+    resolveKchatWebSocketUrl({ websocketProtocol: "mattermost", apiBaseUrl: "http://localhost:8065/custom/path?ignored=true" }),
+    "ws://localhost:8065/api/v4/websocket",
+  );
+  assert.deepEqual(createKchatWebSocketAuthFrame("placeholder-token"), {
+    seq: 1,
+    action: "authentication_challenge",
+    data: {
+      token: "placeholder-token",
+    },
+  });
+
+  const frame = {
+    event: "posted",
+    data: {
+      channel_name: "test",
+      sender_name: "alice",
+      post: JSON.stringify({
+        id: "post-ws-123",
+        channel_id: "channel-123",
+        user_id: "user-123",
+        message: "hello over websocket",
+        create_at: 1710000000000,
+      }),
+    },
+    broadcast: {
+      team_id: "team-123",
+    },
+    seq: 2,
+  };
+
+  assert.deepEqual(normalizeKchatWebSocketPostEvent(frame, { teamName: "main-team" }), {
+    channel_id: "channel-123",
+    channel_name: "test",
+    team_domain: "main-team",
+    team_id: "team-123",
+    post_id: "post-ws-123",
+    user_id: "user-123",
+    user_name: "alice",
+    text: "hello over websocket",
+    create_at: 1710000000000,
+  });
+
+  assert.deepEqual(
+    await dispatchKchatWebSocketEvent({
+      cfg: { channels: { kchat: { teamName: "main-team", websocketChannelIds: ["other-channel"] } } },
+      channelConfig: { teamName: "main-team", websocketChannelIds: ["other-channel"] },
+      runtime: createKchatRuntimeStub({ inboundRuns }),
+      frame,
+    }),
+    { dispatched: false, reason: "ignored_channel" },
+  );
+  assert.equal(inboundRuns.length, 0);
+
+  assert.deepEqual(
+    await dispatchKchatWebSocketEvent({
+      cfg: { channels: { kchat: { teamName: "main-team", ignoredUserIds: ["user-123"] } } },
+      channelConfig: { teamName: "main-team", ignoredUserIds: ["user-123"] },
+      runtime: createKchatRuntimeStub({ inboundRuns }),
+      frame,
+    }),
+    { dispatched: false, reason: "ignored_sender" },
+  );
+  assert.equal(inboundRuns.length, 0);
+});
+
+test("kChat WebSocket connection authenticates and dispatches posted events", async () => {
+  const { runKchatWebSocketConnection } = await import(pathToFileURL(join(repositoryRoot, "index.js")).href);
+  const inboundRuns = [];
+  const dispatchResults = [];
+  const abortController = new AbortController();
+  MockWebSocket.instances = [];
+
+  const connection = runKchatWebSocketConnection({
+    cfg: { channels: { kchat: { teamName: "main-team", websocketProtocol: "mattermost", websocketChannelIds: ["channel-123"] } } },
+    channelConfig: { teamName: "main-team", websocketProtocol: "mattermost", websocketChannelIds: ["channel-123"] },
+    token: "placeholder-token",
+    WebSocketImpl: MockWebSocket,
+    runtime: createKchatRuntimeStub({ inboundRuns }),
+    abortSignal: abortController.signal,
+    onDispatchResult(result) {
+      dispatchResults.push(result);
+    },
+  });
+
+  await waitImmediate();
+  const socket = MockWebSocket.instances[0];
+  assert.equal(socket.url, "wss://main-team.kchat.infomaniak.com/api/v4/websocket");
+  assert.deepEqual(JSON.parse(socket.sent[0]), {
+    seq: 1,
+    action: "authentication_challenge",
+    data: {
+      token: "placeholder-token",
+    },
+  });
+
+  socket.emitMessage(
+    JSON.stringify({
+      status: "OK",
+      seq_reply: 1,
+    }),
+  );
+  socket.emitMessage(
+    JSON.stringify({
+      event: "posted",
+      data: {
+        channel_name: "test",
+        sender_name: "alice",
+        post: JSON.stringify({
+          id: "post-ws-456",
+          channel_id: "channel-123",
+          user_id: "user-123",
+          message: "ping from websocket",
+          create_at: 1710000000000,
+        }),
+      },
+      broadcast: {
+        team_id: "team-123",
+      },
+      seq: 2,
+    }),
+  );
+  await waitImmediate();
+
+  assert.equal(inboundRuns.length, 1);
+  assert.equal(inboundRuns[0].raw.text, "ping from websocket");
+  assert.equal(inboundRuns[0].raw.post_id, "post-ws-456");
+  assert.deepEqual(dispatchResults, [{ dispatched: true, inboundId: "post-ws-456" }]);
+
+  abortController.abort();
+  await connection;
+  assert.equal(socket.closed, true);
+});
+
+test("kChat Infomaniak Echo WebSocket subscribes and dispatches posted events", async () => {
+  const { runKchatWebSocketConnection } = await import(pathToFileURL(join(repositoryRoot, "index.js")).href);
+  const inboundRuns = [];
+  const dispatchResults = [];
+  const fetchCalls = [];
+  const abortController = new AbortController();
+  MockWebSocket.instances = [];
+
+  const fetch = async (url, init = {}) => {
+    fetchCalls.push({ url: String(url), method: init.method ?? "GET", body: String(init.body ?? "") });
+    if (String(url).endsWith("/api/v4/teams/name/main-team")) {
+      return jsonResponse({ id: "team-123", name: "main-team" });
+    }
+    if (String(url).endsWith("/api/v4/users/me")) {
+      return jsonResponse({ id: "user-self", username: "bot-user" });
+    }
+    if (String(url).endsWith("/broadcasting/auth")) {
+      const body = new URLSearchParams(String(init.body ?? ""));
+      return jsonResponse({
+        auth: `kchat-key:${body.get("channel_name")}-signature`,
+        ...(body.get("channel_name")?.startsWith("presence-") ? { channel_data: JSON.stringify({ user_id: "user-self" }) } : {}),
+      });
+    }
+
+    throw new Error(`unexpected fetch ${url}`);
+  };
+
+  const connection = runKchatWebSocketConnection({
+    cfg: { channels: { kchat: { teamName: "main-team", websocketChannelIds: ["channel-123"] } } },
+    channelConfig: { teamName: "main-team", websocketChannelIds: ["channel-123"] },
+    token: "placeholder-token",
+    WebSocketImpl: MockWebSocket,
+    fetch,
+    runtime: createKchatRuntimeStub({ inboundRuns }),
+    abortSignal: abortController.signal,
+    onDispatchResult(result) {
+      dispatchResults.push(result);
+    },
+  });
+
+  await waitImmediate();
+  const socket = MockWebSocket.instances[0];
+  assert.equal(
+    socket.url,
+    "wss://websocket.kchat.infomaniak.com/app/kchat-key?protocol=7&client=potassium-openclaw&version=0.2.0&flash=false",
+  );
+
+  socket.emitMessage(
+    JSON.stringify({
+      event: "pusher:connection_established",
+      data: JSON.stringify({
+        socket_id: "1234.5678",
+        activity_timeout: 30,
+      }),
+    }),
+  );
+  await waitImmediate();
+  await waitImmediate();
+
+  assert.deepEqual(fetchCalls.map((call) => [call.method, call.url]), [
+    ["GET", "https://main-team.kchat.infomaniak.com/api/v4/teams/name/main-team"],
+    ["GET", "https://main-team.kchat.infomaniak.com/api/v4/users/me"],
+    ["POST", "https://main-team.kchat.infomaniak.com/broadcasting/auth"],
+    ["POST", "https://main-team.kchat.infomaniak.com/broadcasting/auth"],
+  ]);
+  assert.deepEqual(
+    socket.sent.map((value) => JSON.parse(value).data.channel),
+    ["private-team.team-123", "presence-teamUser.user-self"],
+  );
+
+  socket.emitMessage(
+    JSON.stringify({
+      event: "pusher_internal:subscription_succeeded",
+      channel: "presence-teamUser.user-self",
+      data: JSON.stringify({ presence: {} }),
+    }),
+  );
+  socket.emitMessage(
+    JSON.stringify({
+      event: "posted",
+      channel: "presence-teamUser.user-self",
+      data: JSON.stringify({
+        channel_name: "test",
+        sender_name: "alice",
+        team_id: "team-123",
+        channel_id: "channel-123",
+        post: JSON.stringify({
+          id: "post-echo-123",
+          channel_id: "channel-123",
+          user_id: "user-123",
+          message: "ping from echo",
+          create_at: 1710000000000,
+        }),
+      }),
+    }),
+  );
+  await waitImmediate();
+
+  assert.equal(inboundRuns.length, 1);
+  assert.equal(inboundRuns[0].raw.text, "ping from echo");
+  assert.equal(inboundRuns[0].raw.post_id, "post-echo-123");
+  assert.deepEqual(dispatchResults, [{ dispatched: true, inboundId: "post-echo-123" }]);
+
+  abortController.abort();
+  await connection;
+  assert.equal(socket.closed, true);
+});
+
 test("runtime entry rejects direct bearer-token config", async () => {
   const plugin = (await import(pathToFileURL(join(repositoryRoot, "index.js")).href)).default;
 
@@ -601,6 +884,56 @@ function createKchatRuntimeStub({ inboundRuns, routeCalls = [], contextCalls = [
       },
     },
   };
+}
+
+class MockWebSocket {
+  static instances = [];
+
+  constructor(url) {
+    this.url = String(url);
+    this.sent = [];
+    this.closed = false;
+    this.listeners = new Map();
+    MockWebSocket.instances.push(this);
+    queueMicrotask(() => this.emit("open", {}));
+  }
+
+  send(value) {
+    this.sent.push(String(value));
+  }
+
+  close() {
+    this.closed = true;
+    this.emit("close", {});
+  }
+
+  addEventListener(eventName, handler) {
+    const listeners = this.listeners.get(eventName) ?? [];
+    listeners.push(handler);
+    this.listeners.set(eventName, listeners);
+  }
+
+  removeEventListener(eventName, handler) {
+    const listeners = this.listeners.get(eventName) ?? [];
+    this.listeners.set(
+      eventName,
+      listeners.filter((listener) => listener !== handler),
+    );
+  }
+
+  emitMessage(data) {
+    this.emit("message", { data });
+  }
+
+  emit(eventName, event) {
+    for (const listener of this.listeners.get(eventName) ?? []) {
+      listener(event);
+    }
+  }
+}
+
+async function waitImmediate() {
+  await new Promise((resolve) => setImmediate(resolve));
 }
 
 function jsonResponse(payload) {

@@ -122,6 +122,26 @@
             "type": "boolean",
             "description": "Whether kChat should set the authenticated user online when creating posts."
           },
+          "receiveMode": {
+            "type": "string",
+            "enum": [
+              "webhook",
+              "websocket",
+              "both",
+              "disabled"
+            ],
+            "default": "webhook",
+            "description": "Inbound receive mode. Use websocket to receive kChat/Mattermost events without a public webhook callback URL."
+          },
+          "websocketProtocol": {
+            "type": "string",
+            "enum": [
+              "infomaniak-echo",
+              "mattermost"
+            ],
+            "default": "infomaniak-echo",
+            "description": "WebSocket protocol to use. Infomaniak kChat uses infomaniak-echo; plain Mattermost servers may use mattermost."
+          },
           "webhookPath": {
             "type": "string",
             "default": "/channels/kchat/webhook",
@@ -145,6 +165,46 @@
               "type": "string"
             },
             "description": "kChat usernames to ignore for inbound webhook events, typically the API posting account."
+          },
+          "websocketUrl": {
+            "type": "string",
+            "description": "Optional explicit WebSocket URL. Defaults to the Infomaniak Echo socket URL or the Mattermost /api/v4/websocket URL based on websocketProtocol."
+          },
+          "websocketHost": {
+            "type": "string",
+            "default": "websocket.kchat.infomaniak.com",
+            "description": "Infomaniak Echo WebSocket host used when websocketProtocol is infomaniak-echo."
+          },
+          "websocketAppKey": {
+            "type": "string",
+            "default": "kchat-key",
+            "description": "Infomaniak Echo/Pusher app key used when websocketProtocol is infomaniak-echo."
+          },
+          "websocketAuthEndpoint": {
+            "type": "string",
+            "description": "Optional Infomaniak Echo private-channel auth endpoint. Defaults to <apiBaseUrl>/broadcasting/auth."
+          },
+          "websocketSubscriptions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Optional explicit Infomaniak Echo subscription channel names. Defaults to private-team.<team_id> and presence-teamUser.<user_id>."
+          },
+          "websocketTeamId": {
+            "type": "string",
+            "description": "Optional kChat team ID override for Infomaniak Echo subscriptions."
+          },
+          "websocketTeamUserId": {
+            "type": "string",
+            "description": "Optional kChat team user ID override for Infomaniak Echo subscriptions."
+          },
+          "websocketChannelIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Optional kChat channel IDs to accept from the WebSocket stream. When omitted, all visible posted events are accepted."
           }
         }
       },
@@ -168,6 +228,12 @@
           "label": "Default channel",
           "placeholder": "#general"
         },
+        "receiveMode": {
+          "label": "Inbound receive mode"
+        },
+        "websocketProtocol": {
+          "label": "WebSocket protocol"
+        },
         "webhookPath": {
           "label": "Webhook path",
           "placeholder": "/channels/kchat/webhook"
@@ -175,6 +241,34 @@
         "outgoingWebhookTokenEnvName": {
           "label": "Outgoing webhook token environment variable",
           "placeholder": "INFOMANIAK_KCHAT_OUTGOING_WEBHOOK_TOKEN"
+        },
+        "websocketUrl": {
+          "label": "WebSocket URL",
+          "placeholder": "wss://websocket.kchat.infomaniak.com/app/kchat-key?protocol=7&client=potassium-openclaw&version=0.2.0&flash=false"
+        },
+        "websocketHost": {
+          "label": "WebSocket host",
+          "placeholder": "websocket.kchat.infomaniak.com"
+        },
+        "websocketAppKey": {
+          "label": "WebSocket app key",
+          "placeholder": "kchat-key"
+        },
+        "websocketAuthEndpoint": {
+          "label": "WebSocket auth endpoint",
+          "placeholder": "https://example-team.kchat.infomaniak.com/broadcasting/auth"
+        },
+        "websocketSubscriptions": {
+          "label": "WebSocket subscriptions"
+        },
+        "websocketTeamId": {
+          "label": "WebSocket team ID"
+        },
+        "websocketTeamUserId": {
+          "label": "WebSocket team user ID"
+        },
+        "websocketChannelIds": {
+          "label": "WebSocket channel IDs"
         }
       }
     }

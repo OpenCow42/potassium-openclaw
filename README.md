@@ -50,7 +50,7 @@ Prefer workflow tools for reviewed domain actions. Use search/describe/discover/
 
 ## kChat Channel
 
-The plugin also declares a dedicated OpenClaw channel capability named `kchat` for outbound kChat replies and inbound kChat outgoing webhooks. Configure it under `channels.kchat` inside the Potassium plugin config.
+The plugin also declares a dedicated OpenClaw channel capability named `kchat` for outbound kChat replies and inbound kChat events. Configure it under `channels.kchat` inside the Potassium plugin config.
 
 Supported kChat channel config:
 
@@ -58,14 +58,26 @@ Supported kChat channel config:
 - `apiBaseUrl`: optional team-specific kChat API base URL. When omitted, Potassium derives `https://<teamName>.kchat.infomaniak.com` from a DNS-safe `teamName`.
 - `defaultChannel`: default outbound destination.
 - `setOnline`: optional `set_online` value sent with outbound posts.
+- `receiveMode`: inbound receive mode, one of `webhook`, `websocket`, `both`, or `disabled`. Defaults to `webhook`.
+- `websocketProtocol`: `infomaniak-echo` for hosted kChat, or `mattermost` for a plain Mattermost `/api/v4/websocket` server. Defaults to `infomaniak-echo`.
 - `webhookPath`: gateway path for inbound outgoing webhooks, default `/channels/kchat/webhook`.
 - `outgoingWebhookTokenEnvName`: environment variable for the webhook verification token, default `INFOMANIAK_KCHAT_OUTGOING_WEBHOOK_TOKEN`.
 - `ignoredUserIds`: sender user IDs to ignore for inbound events.
 - `ignoredUserNames`: sender usernames to ignore for inbound events.
+- `websocketUrl`: optional explicit WebSocket URL.
+- `websocketHost`: Infomaniak Echo socket host, default `websocket.kchat.infomaniak.com`.
+- `websocketAppKey`: Infomaniak Echo/Pusher app key, default `kchat-key`.
+- `websocketAuthEndpoint`: optional Echo private-channel auth endpoint, default `<apiBaseUrl>/broadcasting/auth`.
+- `websocketSubscriptions`: optional explicit Echo subscription channel names.
+- `websocketTeamId`: optional kChat team ID override for Echo subscriptions.
+- `websocketTeamUserId`: optional kChat team user ID override for Echo subscriptions.
+- `websocketChannelIds`: optional list of kChat channel IDs accepted from the WebSocket stream.
 
 Outbound destinations support `id:<channel_id>`, `#channel`, `channel`, and `team/channel`. Thread replies use the root post or reply id as the kChat thread root id.
 
-Inbound setup is intentionally environment-only for secrets: create a kChat outgoing webhook in Infomaniak/kChat that points at the OpenClaw gateway URL plus `webhookPath`, set the webhook verification token in `INFOMANIAK_KCHAT_OUTGOING_WEBHOOK_TOKEN` or the configured env var, and add the posting account to `ignoredUserIds` or `ignoredUserNames` to avoid reply loops. kChat/Mattermost outgoing webhook payloads may arrive as JSON, form-urlencoded fields, or a form `payload` JSON value.
+Inbound setup is intentionally environment-only for secrets. For webhook mode, create a kChat outgoing webhook in Infomaniak/kChat that points at the OpenClaw gateway URL plus `webhookPath`, set the webhook verification token in `INFOMANIAK_KCHAT_OUTGOING_WEBHOOK_TOKEN` or the configured env var, and add the posting account to `ignoredUserIds` or `ignoredUserNames` to avoid reply loops. kChat/Mattermost outgoing webhook payloads may arrive as JSON, form-urlencoded fields, or a form `payload` JSON value.
+
+For WebSocket mode against hosted Infomaniak kChat, set `receiveMode: "websocket"` or `"both"` and keep `INFOMANIAK_TOKEN` available to the OpenClaw process. The adapter connects to Infomaniak's Echo/Pusher-compatible socket, resolves the team/user IDs from `teamName`, authenticates `private-team.<team_id>` and `presence-teamUser.<user_id>` through `/broadcasting/auth`, and receives `posted` events without requiring a public callback URL. Use `websocketChannelIds` when you want to limit which visible kChat channels can trigger OpenClaw. For a plain Mattermost server, set `websocketProtocol: "mattermost"` and optionally `websocketUrl`.
 
 Example non-secret kChat config:
 
@@ -78,10 +90,13 @@ Example non-secret kChat config:
       apiBaseUrl: "https://example-team.kchat.infomaniak.com",
       defaultChannel: "id:<channel-id>",
       setOnline: false,
+      receiveMode: "websocket",
+      websocketProtocol: "infomaniak-echo",
       webhookPath: "/channels/kchat/webhook",
       outgoingWebhookTokenEnvName: "INFOMANIAK_KCHAT_OUTGOING_WEBHOOK_TOKEN",
       ignoredUserIds: ["<posting-user-id>"],
-      ignoredUserNames: ["<posting-user-name>"]
+      ignoredUserNames: ["<posting-user-name>"],
+      websocketChannelIds: ["<channel-id>"]
     }
   }
 }
@@ -160,9 +175,12 @@ openclaw config patch --stdin <<'JSON5'
               teamName: "example-team",
               apiBaseUrl: "https://example-team.kchat.infomaniak.com",
               defaultChannel: "id:<channel-id>",
+              receiveMode: "websocket",
+              websocketProtocol: "infomaniak-echo",
               outgoingWebhookTokenEnvName: "INFOMANIAK_KCHAT_OUTGOING_WEBHOOK_TOKEN",
               ignoredUserIds: ["<posting-user-id>"],
-              ignoredUserNames: ["<posting-user-name>"]
+              ignoredUserNames: ["<posting-user-name>"],
+              websocketChannelIds: ["<channel-id>"]
             }
           }
         }
