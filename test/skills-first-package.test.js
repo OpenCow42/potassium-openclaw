@@ -1,6 +1,7 @@
 import { readdir, readFile, stat } from "node:fs/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { join, relative } from "node:path";
+import { Readable } from "node:stream";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
@@ -49,7 +50,7 @@ test("package declares a native OpenClaw plugin backed by the published liquid-p
   assert.equal(nativeManifest.name, "Potassium");
   assert.deepEqual(nativeManifest.skills, ["./skills"]);
   assert.deepEqual(nativeManifest.channels, expectedChannelIds);
-  assert.deepEqual(nativeManifest.channelEnvVars?.kchat, ["INFOMANIAK_TOKEN"]);
+  assert.deepEqual(nativeManifest.channelEnvVars?.kchat, ["INFOMANIAK_TOKEN", "INFOMANIAK_KCHAT_OUTGOING_WEBHOOK_TOKEN"]);
   assert.deepEqual(nativeManifest.contracts?.tools, expectedToolNames);
   assert.equal("token" in nativeManifest.configSchema?.properties, false);
   assert.equal(nativeManifest.configSchema?.properties?.tokenEnvName?.default, "INFOMANIAK_TOKEN");
@@ -62,6 +63,13 @@ test("package declares a native OpenClaw plugin backed by the published liquid-p
   assert.equal(nativeManifest.channelConfigs?.kchat?.schema?.properties?.teamName?.type, "string");
   assert.equal(nativeManifest.channelConfigs?.kchat?.schema?.properties?.defaultChannel?.type, "string");
   assert.equal(nativeManifest.channelConfigs?.kchat?.schema?.properties?.setOnline?.type, "boolean");
+  assert.equal(nativeManifest.channelConfigs?.kchat?.schema?.properties?.webhookPath?.default, "/channels/kchat/webhook");
+  assert.equal(
+    nativeManifest.channelConfigs?.kchat?.schema?.properties?.outgoingWebhookTokenEnvName?.default,
+    "INFOMANIAK_KCHAT_OUTGOING_WEBHOOK_TOKEN",
+  );
+  assert.equal(nativeManifest.channelConfigs?.kchat?.schema?.properties?.ignoredUserIds?.items?.type, "string");
+  assert.equal(nativeManifest.channelConfigs?.kchat?.schema?.properties?.ignoredUserNames?.items?.type, "string");
 
   assert.equal(codexManifest.name, "potassium");
   assert.equal(codexManifest.license, "Apache-2.0");
@@ -76,6 +84,7 @@ test("runtime entry registers exactly the manifest tool contracts", async () => 
   const plugin = pluginModule.default;
   const registeredTools = [];
   const registeredChannels = [];
+  const registeredRoutes = [];
 
   assert.equal("token" in pluginModule.PotassiumPluginConfigJsonSchema.properties, false);
   assert.equal("token" in pluginModule.PotassiumKchatChannelConfigJsonSchema.properties, false);
@@ -85,6 +94,9 @@ test("runtime entry registers exactly the manifest tool contracts", async () => 
     config: { channels: { kchat: { enabled: true } } },
     registerChannel(channel) {
       registeredChannels.push(channel);
+    },
+    registerHttpRoute(route) {
+      registeredRoutes.push(route);
     },
     registerTool(tool) {
       registeredTools.push(tool);
@@ -111,6 +123,11 @@ test("runtime entry registers exactly the manifest tool contracts", async () => 
   assert.equal(kchatChannel.outbound?.sendText instanceof Function, true);
   assert.equal(kchatChannel.config.hasConfiguredState({ cfg: {}, env: { INFOMANIAK_TOKEN: "placeholder" } }), true);
   assert.equal(kchatChannel.config.hasConfiguredState({ cfg: {}, env: {} }), false);
+  assert.deepEqual(
+    registeredRoutes.map((route) => ({ path: route.path, auth: route.auth, match: route.match })),
+    [{ path: "/channels/kchat/webhook", auth: "plugin", match: "exact" }],
+  );
+  assert.equal(registeredRoutes[0]?.handler instanceof Function, true);
 });
 
 test("kChat outbound sends directly to id: destinations without channel lookup", async () => {
@@ -209,6 +226,212 @@ test("kChat outbound resolves #channel destinations before creating posts", asyn
   assert.equal(result.receipt.replyToId, "reply-ignored-when-thread-exists");
 });
 
+test("kChat inbound webhook dispatches valid JSON payloads through the channel runtime", async () => {
+  const { createPotassiumKchatWebhookHandler } = await import(pathToFileURL(join(repositoryRoot, "index.js")).href);
+  const inboundRuns = [];
+  const routeCalls = [];
+  const contextCalls = [];
+  const handler = createPotassiumKchatWebhookHandler({
+    cfg: { channels: { kchat: { enabled: true } } },
+    channelConfig: {},
+    env: { INFOMANIAK_KCHAT_OUTGOING_WEBHOOK_TOKEN: "expected-placeholder" },
+    runtime: createKchatRuntimeStub({ inboundRuns, routeCalls, contextCalls }),
+  });
+
+  const response = await invokeWebhookHandler(handler, {
+    contentType: "application/json",
+    body: JSON.stringify({
+      token: "expected-placeholder",
+      channel_id: "channel-123",
+      channel_name: "general",
+      team_domain: "main",
+      team_id: "team-123",
+      post_id: "post-123",
+      root_id: "root-123",
+      user_id: "user-123",
+      user_name: "alice",
+      text: "hello from kChat",
+      timestamp: "1710000000",
+    }),
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(JSON.parse(response.body), { ok: true, status: "dispatched" });
+  assert.equal(inboundRuns.length, 1);
+  assert.equal(inboundRuns[0].channel, "kchat");
+  assert.equal(inboundRuns[0].accountId, "default");
+  assert.equal(inboundRuns[0].raw.token, "[redacted]");
+  assert.equal(inboundRuns[0].raw.text, "hello from kChat");
+
+  const input = inboundRuns[0].adapter.ingest();
+  assert.deepEqual(input, {
+    id: "post-123",
+    timestamp: 1710000000000,
+    rawText: "hello from kChat",
+    textForAgent: "hello from kChat",
+    textForCommands: "hello from kChat",
+    raw: inboundRuns[0].raw,
+  });
+
+  const turn = await inboundRuns[0].adapter.resolveTurn(input);
+  assert.equal(turn.channel, "kchat");
+  assert.equal(turn.accountId, "default");
+  assert.equal(turn.agentId, "agent-123");
+  assert.equal(turn.routeSessionKey, "session-channel-123");
+  assert.equal(turn.storePath, "/tmp/openclaw-test/agent-123");
+  assert.equal(turn.ctxPayload.conversation.id, "channel-123");
+  assert.equal(turn.ctxPayload.conversation.label, "main/general");
+  assert.equal(turn.ctxPayload.conversation.threadId, "root-123");
+  assert.equal(turn.ctxPayload.reply.to, "id:channel-123");
+  assert.equal(turn.ctxPayload.reply.messageThreadId, "root-123");
+  assert.equal(turn.ctxPayload.message.bodyForAgent, "hello from kChat");
+  assert.deepEqual(routeCalls[0].peer, { kind: "channel", id: "channel-123" });
+  assert.equal(contextCalls.length, 1);
+});
+
+test("kChat inbound webhook rejects invalid tokens without dispatching", async () => {
+  const { createPotassiumKchatWebhookHandler } = await import(pathToFileURL(join(repositoryRoot, "index.js")).href);
+  const calls = [];
+  const handler = createPotassiumKchatWebhookHandler({
+    cfg: { channels: { kchat: { enabled: true } } },
+    channelConfig: {},
+    env: { INFOMANIAK_KCHAT_OUTGOING_WEBHOOK_TOKEN: "expected-placeholder" },
+    runtime: {
+      channel: {
+        inbound: {
+          async run(params) {
+            calls.push(params);
+          },
+        },
+      },
+    },
+  });
+
+  const response = await invokeWebhookHandler(handler, {
+    contentType: "application/json",
+    body: JSON.stringify({
+      token: "wrong-placeholder",
+      channel_id: "channel-123",
+      post_id: "post-123",
+      user_id: "user-123",
+      text: "hello from kChat",
+    }),
+  });
+
+  assert.equal(response.statusCode, 401);
+  assert.deepEqual(JSON.parse(response.body), { ok: false, error: "invalid_token" });
+  assert.equal(calls.length, 0);
+});
+
+test("kChat inbound webhook drops ignored users without dispatching", async () => {
+  const { createPotassiumKchatWebhookHandler } = await import(pathToFileURL(join(repositoryRoot, "index.js")).href);
+  const calls = [];
+  const handler = createPotassiumKchatWebhookHandler({
+    cfg: { channels: { kchat: { ignoredUserIds: ["bot-user"] } } },
+    channelConfig: { ignoredUserIds: ["bot-user"] },
+    env: { INFOMANIAK_KCHAT_OUTGOING_WEBHOOK_TOKEN: "expected-placeholder" },
+    runtime: {
+      channel: {
+        inbound: {
+          async run(params) {
+            calls.push(params);
+          },
+        },
+      },
+    },
+  });
+
+  const response = await invokeWebhookHandler(handler, {
+    contentType: "application/json",
+    body: JSON.stringify({
+      token: "expected-placeholder",
+      channel_id: "channel-123",
+      post_id: "post-123",
+      user_id: "bot-user",
+      user_name: "api-poster",
+      text: "loop candidate",
+    }),
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(JSON.parse(response.body), { ok: true, status: "dropped" });
+  assert.equal(calls.length, 0);
+});
+
+test("kChat inbound webhook parses form and payload-wrapped bodies", async () => {
+  const { createPotassiumKchatWebhookHandler, parseKchatWebhookBody } = await import(
+    pathToFileURL(join(repositoryRoot, "index.js")).href
+  );
+  const calls = [];
+  const handler = createPotassiumKchatWebhookHandler({
+    cfg: { channels: { kchat: { enabled: true } } },
+    channelConfig: {},
+    env: { INFOMANIAK_KCHAT_OUTGOING_WEBHOOK_TOKEN: "expected-placeholder" },
+    runtime: {
+      channel: {
+        inbound: {
+          async run(params) {
+            calls.push(params);
+          },
+        },
+      },
+    },
+  });
+
+  const form = new URLSearchParams({
+    token: "expected-placeholder",
+    channel_id: "channel-123",
+    post_id: "post-123",
+    user_name: "alice",
+    text: "plain form",
+  });
+  const formResponse = await invokeWebhookHandler(handler, {
+    contentType: "application/x-www-form-urlencoded",
+    body: form.toString(),
+  });
+
+  const nested = parseKchatWebhookBody(
+    new URLSearchParams({
+      payload: JSON.stringify({
+        token: "expected-placeholder",
+        channel_id: "channel-456",
+        post_id: "post-456",
+        user_name: "bob",
+        text: "nested form",
+      }),
+    }).toString(),
+    "application/x-www-form-urlencoded",
+  );
+
+  assert.equal(formResponse.statusCode, 200);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].raw.text, "plain form");
+  assert.equal(nested.channel_id, "channel-456");
+  assert.equal(nested.text, "nested form");
+});
+
+test("kChat inbound normalization preserves thread context and redacts tokens", async () => {
+  const { normalizeKchatOutgoingWebhookPayload } = await import(pathToFileURL(join(repositoryRoot, "index.js")).href);
+
+  const normalized = normalizeKchatOutgoingWebhookPayload({
+    token: "placeholder-token",
+    channel_name: "alerts",
+    team_domain: "main",
+    post_id: "post-789",
+    rootId: "root-789",
+    userName: "charlie",
+    text: "threaded inbound",
+    timestamp: 1710000000,
+  });
+
+  assert.equal(normalized.id, "post-789");
+  assert.equal(normalized.rootId, "root-789");
+  assert.equal(normalized.conversationId, "main/alerts");
+  assert.equal(normalized.timestamp, 1710000000000);
+  assert.equal(normalized.sender.username, "charlie");
+  assert.equal(normalized.raw.token, "[redacted]");
+});
+
 test("runtime entry rejects direct bearer-token config", async () => {
   const plugin = (await import(pathToFileURL(join(repositoryRoot, "index.js")).href)).default;
 
@@ -267,4 +490,65 @@ async function collectJavaScriptFiles(path, files) {
   for (const entry of entries) {
     await collectJavaScriptFiles(join(path, entry.name), files);
   }
+}
+
+async function invokeWebhookHandler(handler, { body, contentType }) {
+  const req = Readable.from([body]);
+  req.method = "POST";
+  req.headers = {
+    "content-type": contentType,
+    "content-length": String(Buffer.byteLength(body)),
+  };
+
+  const response = {
+    statusCode: 200,
+    headers: {},
+    body: "",
+    setHeader(name, value) {
+      this.headers[name.toLowerCase()] = value;
+    },
+    end(value = "") {
+      this.body = String(value);
+    },
+  };
+
+  const handled = await handler(req, response);
+  assert.equal(handled, true);
+  return response;
+}
+
+function createKchatRuntimeStub({ inboundRuns, routeCalls = [], contextCalls = [] }) {
+  return {
+    channel: {
+      inbound: {
+        async run(params) {
+          inboundRuns.push(params);
+        },
+        buildContext(params) {
+          contextCalls.push(params);
+          return params;
+        },
+      },
+      routing: {
+        resolveAgentRoute(params) {
+          routeCalls.push(params);
+          return {
+            agentId: "agent-123",
+            accountId: params.accountId,
+            sessionKey: `session-${params.peer.id}`,
+            mainSessionKey: "main-session-123",
+          };
+        },
+      },
+      session: {
+        resolveStorePath(_storeConfig, { agentId }) {
+          return `/tmp/openclaw-test/${agentId}`;
+        },
+        async recordInboundSession() {},
+      },
+      reply: {
+        async dispatchReplyWithBufferedBlockDispatcher() {},
+      },
+    },
+  };
 }

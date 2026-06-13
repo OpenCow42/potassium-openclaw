@@ -8,3 +8,5 @@
 - Worker pass 1: added a minimal `kchat` channel manifest/runtime scaffold, preserved existing `infomaniak_*` tool registration, and kept outbound kChat API work out of scope.
 - Worker pass 2: implemented outbound text delivery for kChat with env-only token resolution, `id:` channel IDs, `#channel`/`channel`/`team/channel` name resolution, optional `setOnline`, and thread/reply root mapping through liquid-potassium `GetChannelByNameForTeamName` and `CreatePost`.
 - Validation after pass 2: `npm test`, `npm run check`, and `git diff --check` passed.
+- Worker pass 3: implemented inbound kChat outgoing webhook support with plugin-managed token verification from `INFOMANIAK_KCHAT_OUTGOING_WEBHOOK_TOKEN`, configurable webhook path, ignored sender lists, JSON/form/payload body parsing, redacted raw payload metadata, Mattermost-style field normalization, and dispatch through `runtime.channel.inbound.run`.
+- Validation after pass 3: `npm test`, `npm run check`, and `git diff --check` passed. Inbound webhook tests use mocked route/runtime dispatch and make no live Infomaniak API calls.

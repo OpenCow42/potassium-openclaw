@@ -23,7 +23,8 @@
   },
   "channelEnvVars": {
     "kchat": [
-      "INFOMANIAK_TOKEN"
+      "INFOMANIAK_TOKEN",
+      "INFOMANIAK_KCHAT_OUTGOING_WEBHOOK_TOKEN"
     ]
   },
   "contracts": {
@@ -116,6 +117,30 @@
           "setOnline": {
             "type": "boolean",
             "description": "Whether kChat should set the authenticated user online when creating posts."
+          },
+          "webhookPath": {
+            "type": "string",
+            "default": "/channels/kchat/webhook",
+            "description": "Gateway HTTP path that receives kChat outgoing webhook events."
+          },
+          "outgoingWebhookTokenEnvName": {
+            "type": "string",
+            "default": "INFOMANIAK_KCHAT_OUTGOING_WEBHOOK_TOKEN",
+            "description": "Environment variable name used for the kChat outgoing webhook verification token."
+          },
+          "ignoredUserIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "kChat user IDs to ignore for inbound webhook events, typically the API posting account."
+          },
+          "ignoredUserNames": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "kChat usernames to ignore for inbound webhook events, typically the API posting account."
           }
         }
       },
@@ -134,6 +159,14 @@
         "defaultChannel": {
           "label": "Default channel",
           "placeholder": "#general"
+        },
+        "webhookPath": {
+          "label": "Webhook path",
+          "placeholder": "/channels/kchat/webhook"
+        },
+        "outgoingWebhookTokenEnvName": {
+          "label": "Outgoing webhook token environment variable",
+          "placeholder": "INFOMANIAK_KCHAT_OUTGOING_WEBHOOK_TOKEN"
         }
       }
     }
