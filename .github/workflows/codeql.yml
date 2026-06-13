@@ -19,6 +19,7 @@ jobs:
   analyze:
     name: Analyze JavaScript
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     steps:
       - name: Checkout
@@ -31,3 +32,8 @@ jobs:
 
       - name: Perform CodeQL analysis
         uses: github/codeql-action/analyze@v3
+        with:
+          # Code scanning is not enabled for this private repository, so keep
+          # CodeQL as a PR smoke check without uploading SARIF.
+          upload: never
+          upload-database: false
