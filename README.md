@@ -12,15 +12,15 @@ This package no longer depends on an external executable. It registers native Op
 - `skills/` provides task guidance for kDrive, Mail, kChat, URL shortener, and general Infomaniak workflows.
 - `docs/` records the architecture and dependency strategy.
 
-## Dependency Pin
+## Dependency
 
-`liquid-potassium` is pinned to a GitHub commit instead of an npm publication:
+`liquid-potassium` is consumed from npm and pinned to the published package version:
 
 ```json
-"liquid-potassium": "github:OpenCow42/liquidPotassium#28450a310eeed5ffb18e05e9a93f60be506260b8"
+"liquid-potassium": "0.1.0"
 ```
 
-That commit reports package version `0.1.0` and includes built runtime output so OpenClaw git installs can work with lifecycle scripts disabled.
+The published package includes built runtime output, so imports such as `liquid-potassium/openclaw/tools` work without install-time build scripts.
 
 ## Requirements
 

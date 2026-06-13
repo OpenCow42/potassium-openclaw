@@ -8,7 +8,7 @@ This repository is the OpenClaw integration layer for Infomaniak workflows. It o
 - manifest metadata and tool contracts;
 - skill guidance for agents;
 - conservative mutation and credential rules;
-- the pinned dependency on `liquid-potassium`.
+- the pinned npm dependency on `liquid-potassium`.
 
 The reusable API client, catalog, discovery logic, Mail application client, and reviewed domain workflows live in `liquid-potassium`.
 
@@ -33,6 +33,6 @@ Mutations are controlled by plugin policy plus explicit user intent.
 
 ## Dependency Strategy
 
-Until `liquid-potassium` is published to npm, this package depends on a specific GitHub commit. The pinned commit includes built `dist` output because OpenClaw git installs use npm with lifecycle scripts disabled.
+This package depends on the published `liquid-potassium` npm package at an exact version. The published package must include built runtime output because OpenClaw installs may run npm with lifecycle scripts disabled.
 
 See [Liquid Potassium Integration](liquid-potassium-integration.md) for details.

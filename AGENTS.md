@@ -6,7 +6,7 @@ This repository packages a native OpenClaw plugin and skills for Infomaniak work
 
 - Do not reintroduce an external executable runtime.
 - Do not vendor `liquid-potassium` source here.
-- Pin `liquid-potassium` to a specific GitHub commit until it is intentionally published to npm.
+- Pin `liquid-potassium` to an exact published npm version.
 - Keep this repository as the OpenClaw adapter, manifest, packaging, docs, and skill layer.
 
 ## Safety Rules

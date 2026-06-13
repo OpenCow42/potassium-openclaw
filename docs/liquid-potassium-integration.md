@@ -2,23 +2,23 @@
 
 ## Decision
 
-Use `liquid-potassium` as a Node dependency pinned to a specific GitHub commit:
+Use `liquid-potassium` as a Node dependency pinned to the published npm package version:
 
 ```json
-"liquid-potassium": "github:OpenCow42/liquidPotassium#28450a310eeed5ffb18e05e9a93f60be506260b8"
+"liquid-potassium": "0.1.0"
 ```
 
-Do not publish `liquid-potassium` to npm yet. Do not create a tag or release just for this migration.
+The package is published at <https://www.npmjs.com/package/liquid-potassium/v/0.1.0>.
 
-## Why the Commit Includes `dist`
+## Published Package Requirements
 
-OpenClaw git installs run dependency installation with lifecycle scripts disabled. A GitHub dependency that needs `prepare` to build its runtime output is therefore not sufficient for this package.
+OpenClaw installs may run dependency installation with lifecycle scripts disabled. The published `liquid-potassium` package must therefore include built runtime output instead of relying on `prepare` or another install-time build.
 
-The pinned `liquid-potassium` commit keeps package version `0.1.0` and tracks built runtime files under `dist/src` and `dist/openclaw`, so imports such as `liquid-potassium/openclaw/tools` work without install-time build scripts.
+Version `0.1.0` includes built runtime files for the OpenClaw entrypoints, so imports such as `liquid-potassium/openclaw/tools` work without install-time build scripts.
 
 ## OpenClaw Package Responsibilities
 
-- Pin the exact GitHub commit.
+- Pin the exact npm package version.
 - Register tools through the Node SDK.
 - Keep skills aligned with registered tool names.
 - Keep Infomaniak credentials in `INFOMANIAK_TOKEN` or the configured `tokenEnvName`.
@@ -33,6 +33,6 @@ The pinned `liquid-potassium` commit keeps package version `0.1.0` and tracks bu
 - Own Mail application route handling.
 - Preserve raw upload request bodies and local `file_path` upload support.
 
-## Future Publish Path
+## Upgrade Path
 
-When `liquid-potassium` is ready for npm publication, replace the GitHub dependency with a semver range and regenerate the lockfile. Until then, update the commit pin only after the target GitHub commit has been pushed and validated.
+When `liquid-potassium` publishes a new version, update the exact dependency version and regenerate the lockfile only after validating the published package includes the runtime files needed by this adapter.

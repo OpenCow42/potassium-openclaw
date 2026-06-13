@@ -49,7 +49,7 @@
     "test": "node --test test/*.test.js"
   },
   "dependencies": {
-    "liquid-potassium": "github:OpenCow42/liquidPotassium#28450a310eeed5ffb18e05e9a93f60be506260b8"
+    "liquid-potassium": "0.1.0"
   },
   "peerDependencies": {
     "openclaw": ">=2026.6.6"
