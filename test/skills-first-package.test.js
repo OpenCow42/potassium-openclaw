@@ -59,6 +59,9 @@ test("package declares a native OpenClaw plugin backed by the published liquid-p
   assert.equal(nativeManifest.channelConfigs?.kchat?.schema?.additionalProperties, false);
   assert.equal("token" in nativeManifest.channelConfigs?.kchat?.schema?.properties, false);
   assert.equal(nativeManifest.channelConfigs?.kchat?.schema?.properties?.tokenEnvName?.default, "INFOMANIAK_TOKEN");
+  assert.equal(nativeManifest.channelConfigs?.kchat?.schema?.properties?.teamName?.type, "string");
+  assert.equal(nativeManifest.channelConfigs?.kchat?.schema?.properties?.defaultChannel?.type, "string");
+  assert.equal(nativeManifest.channelConfigs?.kchat?.schema?.properties?.setOnline?.type, "boolean");
 
   assert.equal(codexManifest.name, "potassium");
   assert.equal(codexManifest.license, "Apache-2.0");
@@ -97,9 +100,113 @@ test("runtime entry registers exactly the manifest tool contracts", async () => 
   const [kchatChannel] = registeredChannels.map(({ plugin: channelPlugin }) => channelPlugin);
   assert.equal(kchatChannel.meta.label, "Infomaniak kChat");
   assert.deepEqual(kchatChannel.capabilities.chatTypes, ["direct", "group", "channel", "thread"]);
-  assert.equal("outbound" in kchatChannel, false);
+  assert.equal(kchatChannel.message?.id, "kchat");
+  assert.equal(kchatChannel.message?.send?.text instanceof Function, true);
+  assert.deepEqual(kchatChannel.message?.durableFinal?.capabilities, {
+    text: true,
+    replyTo: true,
+    thread: true,
+  });
+  assert.equal(kchatChannel.outbound?.deliveryMode, "direct");
+  assert.equal(kchatChannel.outbound?.sendText instanceof Function, true);
   assert.equal(kchatChannel.config.hasConfiguredState({ cfg: {}, env: { INFOMANIAK_TOKEN: "placeholder" } }), true);
   assert.equal(kchatChannel.config.hasConfiguredState({ cfg: {}, env: {} }), false);
+});
+
+test("kChat outbound sends directly to id: destinations without channel lookup", async () => {
+  const { createPotassiumKchatMessageAdapter } = await import(pathToFileURL(join(repositoryRoot, "index.js")).href);
+  const calls = [];
+  const client = {
+    kchat: {
+      async getchannelbynameforteamname(request) {
+        calls.push(["lookup", request]);
+        throw new Error("id: destinations must not resolve channel names");
+      },
+      async createpost(request) {
+        calls.push(["createpost", request]);
+        return { id: "post-123", channel_id: "channel-123", create_at: 1710000000000 };
+      },
+    },
+  };
+  const adapter = createPotassiumKchatMessageAdapter({ client });
+
+  const result = await adapter.send.text({
+    cfg: { channels: { kchat: { teamName: "main-team" } } },
+    to: "id:channel-123",
+    text: "hello from tests",
+    replyToId: "root-from-reply",
+  });
+
+  assert.deepEqual(calls, [
+    [
+      "createpost",
+      {
+        body: {
+          channel_id: "channel-123",
+          message: "hello from tests",
+          root_id: "root-from-reply",
+        },
+      },
+    ],
+  ]);
+  assert.equal(result.messageId, "post-123");
+  assert.equal(result.receipt.primaryPlatformMessageId, "post-123");
+  assert.equal(result.receipt.replyToId, "root-from-reply");
+  assert.deepEqual(result.providerResult, { id: "post-123", channel_id: "channel-123", create_at: 1710000000000 });
+});
+
+test("kChat outbound resolves #channel destinations before creating posts", async () => {
+  const { createPotassiumKchatMessageAdapter } = await import(pathToFileURL(join(repositoryRoot, "index.js")).href);
+  const calls = [];
+  const client = {
+    kchat: {
+      async getchannelbynameforteamname(request) {
+        calls.push(["lookup", request]);
+        return { id: "alerts-channel-id", name: "alerts" };
+      },
+      async createpost(request) {
+        calls.push(["createpost", request]);
+        return { id: "post-456", channel_id: "alerts-channel-id" };
+      },
+    },
+  };
+  const adapter = createPotassiumKchatMessageAdapter({ client });
+
+  const result = await adapter.send.text({
+    cfg: { channels: { kchat: { teamName: "main-team", setOnline: false } } },
+    to: "#alerts",
+    text: "threaded update",
+    threadId: "thread-root",
+    replyToId: "reply-ignored-when-thread-exists",
+  });
+
+  assert.deepEqual(calls, [
+    [
+      "lookup",
+      {
+        path: {
+          team_name: "main-team",
+          channel_name: "alerts",
+        },
+      },
+    ],
+    [
+      "createpost",
+      {
+        body: {
+          channel_id: "alerts-channel-id",
+          message: "threaded update",
+          root_id: "thread-root",
+        },
+        query: {
+          set_online: false,
+        },
+      },
+    ],
+  ]);
+  assert.equal(result.messageId, "post-456");
+  assert.equal(result.receipt.threadId, "thread-root");
+  assert.equal(result.receipt.replyToId, "reply-ignored-when-thread-exists");
 });
 
 test("runtime entry rejects direct bearer-token config", async () => {

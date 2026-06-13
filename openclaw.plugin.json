@@ -104,6 +104,18 @@
             "type": "string",
             "default": "INFOMANIAK_TOKEN",
             "description": "Environment variable name used for the Infomaniak API bearer token."
+          },
+          "teamName": {
+            "type": "string",
+            "description": "Default kChat team name used when resolving channel names."
+          },
+          "defaultChannel": {
+            "type": "string",
+            "description": "Default kChat destination. Supports id:<channel_id>, #channel, channel, or team/channel."
+          },
+          "setOnline": {
+            "type": "boolean",
+            "description": "Whether kChat should set the authenticated user online when creating posts."
           }
         }
       },
@@ -115,6 +127,13 @@
         "tokenEnvName": {
           "label": "Token environment variable",
           "placeholder": "INFOMANIAK_TOKEN"
+        },
+        "teamName": {
+          "label": "Team name"
+        },
+        "defaultChannel": {
+          "label": "Default channel",
+          "placeholder": "#general"
         }
       }
     }
