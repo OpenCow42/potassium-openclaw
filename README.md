@@ -50,7 +50,7 @@ Prefer workflow tools for reviewed domain actions. Use search/describe/discover/
 
 ## Configuration
 
-Default credential injection reads `INFOMANIAK_TOKEN`. Supported plugin config includes:
+Default credential injection reads `INFOMANIAK_TOKEN`. Direct bearer-token config is intentionally rejected by this adapter; use an environment variable instead. Supported plugin config includes:
 
 - `tokenEnvName`: environment variable name for the bearer token, default `INFOMANIAK_TOKEN`.
 - `baseUrl`: optional Infomaniak API base URL override.
@@ -60,7 +60,7 @@ Default credential injection reads `INFOMANIAK_TOKEN`. Supported plugin config i
 - `deniedOperations`: optional backing operation denylist.
 - `blockMutating`: defaults to `true`.
 
-Do not place bearer tokens in chat, docs, tests, or committed config.
+Do not place bearer tokens in chat, docs, tests, OpenClaw config files, or committed config.
 
 ## Install in OpenClaw
 

@@ -2,5 +2,12 @@ node_modules/
 dist/
 .DS_Store
 .env
+.env.*
+!.env.example
+.npmrc
 .openclaw-local.json
+*.pem
+*.key
+*.p12
+*.pfx
 coverage/

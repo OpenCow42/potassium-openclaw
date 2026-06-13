@@ -20,7 +20,7 @@ This repository does not vendor Infomaniak API source, compile native code, or s
 2. `index.js` builds the plugin config schema from `liquid-potassium/openclaw/tools`.
 3. At registration time, the plugin resolves config and registers the `infomaniak_*` tools created by `liquid-potassium`.
 4. Tool calls use the SDK's injected `fetch`, `client.workflows`, discovery helpers, Mail application client, or raw operation dispatcher.
-5. Credentials are read from `INFOMANIAK_TOKEN` by default, or from the configured `tokenEnvName`.
+5. Credentials are read from `INFOMANIAK_TOKEN` by default, or from the configured `tokenEnvName`; direct bearer-token plugin config is rejected.
 
 ## Mutation Policy
 

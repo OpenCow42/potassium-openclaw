@@ -21,7 +21,7 @@ Version `0.1.0` includes built runtime files for the OpenClaw entrypoints, so im
 - Pin the exact npm package version.
 - Register tools through the Node SDK.
 - Keep skills aligned with registered tool names.
-- Keep Infomaniak credentials in `INFOMANIAK_TOKEN` or the configured `tokenEnvName`.
+- Keep Infomaniak credentials in `INFOMANIAK_TOKEN` or the configured `tokenEnvName`; this adapter rejects direct bearer-token plugin config.
 - Keep mutation tooling disabled by default through plugin config.
 - Test package metadata and plugin registration without live Infomaniak API calls.
 

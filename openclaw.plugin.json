@@ -35,14 +35,10 @@
     "type": "object",
     "additionalProperties": false,
     "properties": {
-      "token": {
-        "type": "string",
-        "description": "Infomaniak API bearer token."
-      },
       "tokenEnvName": {
         "type": "string",
         "default": "INFOMANIAK_TOKEN",
-        "description": "Environment variable name used for the Infomaniak API bearer token when token is not configured directly."
+        "description": "Environment variable name used for the Infomaniak API bearer token."
       },
       "baseUrl": {
         "type": "string",
