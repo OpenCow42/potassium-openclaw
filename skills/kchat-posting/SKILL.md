@@ -91,7 +91,6 @@ Use webhook mode only when the deployment needs kChat outgoing webhooks instead 
 
 When the `kchat` channel runtime is configured and active, ordinary assistant replies in that channel should flow through the channel route. Use direct `infomaniak_workflow_run` posting only for explicit one-off posts, manual troubleshooting, or setup tasks outside the OpenClaw channel conversation.
 
-
 ## Workflow
 
 1. Resolve the kChat team.

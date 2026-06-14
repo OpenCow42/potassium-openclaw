@@ -27,6 +27,15 @@ const dangerousRuntimeImports = [
   "node:worker_threads",
   "worker_threads",
 ];
+const installSpecificKchatExamples = [
+  "example-team",
+  "<posting-user-name>",
+  "<channel-id>",
+  "<posting-user-id>",
+  "#support",
+  "example-team/support",
+  "channel `support`",
+];
 
 test("package declares a native OpenClaw plugin backed by the published liquid-potassium package", async () => {
   const packageJson = JSON.parse(await readFile(join(repositoryRoot, "package.json"), "utf8"));
@@ -98,6 +107,17 @@ test("package declares a native OpenClaw plugin backed by the published liquid-p
   assert.equal(codexManifest.author?.name, "OpenCow");
   assert.equal(codexManifest.skills, "./skills/");
   assert.equal(codexManifest.interface?.displayName, "Potassium");
+});
+
+test("shipped kChat docs avoid local install-specific examples", async () => {
+  const files = ["README.md", "openclaw.plugin.json", join("skills", "kchat-posting", "SKILL.md")];
+
+  for (const file of files) {
+    const source = await readFile(join(repositoryRoot, file), "utf8");
+    for (const forbiddenValue of installSpecificKchatExamples) {
+      assert.equal(source.includes(forbiddenValue), false, `${file} must not include local kChat example ${forbiddenValue}`);
+    }
+  }
 });
 
 test("runtime entry registers exactly the manifest tool contracts", async () => {
