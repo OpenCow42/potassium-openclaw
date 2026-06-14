@@ -8,6 +8,9 @@
   "skills": [
     "./skills"
   ],
+  "channels": [
+    "kchat"
+  ],
   "setup": {
     "providers": [
       {
@@ -16,6 +19,12 @@
           "INFOMANIAK_TOKEN"
         ]
       }
+    ]
+  },
+  "channelEnvVars": {
+    "kchat": [
+      "INFOMANIAK_TOKEN",
+      "INFOMANIAK_KCHAT_OUTGOING_WEBHOOK_TOKEN"
     ]
   },
   "contracts": {
@@ -73,6 +82,250 @@
         "type": "boolean",
         "default": true,
         "description": "When true, mutating operations are blocked even if requested explicitly."
+      }
+    }
+  },
+  "channelConfigs": {
+    "kchat": {
+      "label": "Infomaniak kChat",
+      "description": "Infomaniak kChat channel scaffold backed by the Potassium Infomaniak SDK.",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Optional display name for this Infomaniak kChat channel account."
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "Whether the Infomaniak kChat channel scaffold is enabled."
+          },
+          "tokenEnvName": {
+            "type": "string",
+            "default": "INFOMANIAK_TOKEN",
+            "description": "Environment variable name used for the Infomaniak API bearer token."
+          },
+          "teamName": {
+            "type": "string",
+            "description": "Default kChat team name used when resolving channel names."
+          },
+          "apiBaseUrl": {
+            "type": "string",
+            "description": "Team-specific kChat API base URL. Defaults to https://<teamName>.kchat.infomaniak.com when teamName is configured."
+          },
+          "defaultChannel": {
+            "type": "string",
+            "description": "Default kChat destination. Supports id:<channel_id>, #channel, channel, or team/channel."
+          },
+          "setOnline": {
+            "type": "boolean",
+            "description": "Whether kChat should set the authenticated user online when creating posts."
+          },
+          "typingIndicator": {
+            "type": "boolean",
+            "default": true,
+            "description": "Whether inbound kChat replies should publish a native typing indicator while OpenClaw is preparing a reply."
+          },
+          "setOnlineOnReplyStart": {
+            "type": "boolean",
+            "description": "Whether inbound kChat replies should manually set the authenticated user online before publishing typing. Defaults to true when setOnline is true."
+          },
+          "receiveMode": {
+            "type": "string",
+            "enum": [
+              "webhook",
+              "websocket",
+              "both",
+              "disabled"
+            ],
+            "default": "webhook",
+            "description": "Inbound receive mode. Use websocket to receive kChat/Mattermost events without a public webhook callback URL."
+          },
+          "websocketProtocol": {
+            "type": "string",
+            "enum": [
+              "infomaniak-echo",
+              "mattermost"
+            ],
+            "default": "infomaniak-echo",
+            "description": "WebSocket protocol to use. Infomaniak kChat uses infomaniak-echo; plain Mattermost servers may use mattermost."
+          },
+          "webhookPath": {
+            "type": "string",
+            "default": "/channels/kchat/webhook",
+            "description": "Gateway HTTP path that receives kChat outgoing webhook events."
+          },
+          "outgoingWebhookTokenEnvName": {
+            "type": "string",
+            "default": "INFOMANIAK_KCHAT_OUTGOING_WEBHOOK_TOKEN",
+            "description": "Environment variable name used for the kChat outgoing webhook verification token."
+          },
+          "ignoredUserIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "kChat user IDs to ignore for inbound webhook events, typically the API posting account."
+          },
+          "ignoredUserNames": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "kChat usernames to ignore for inbound webhook events, typically the API posting account."
+          },
+          "websocketChannelScope": {
+            "type": "string",
+            "enum": [
+              "all",
+              "selected"
+            ],
+            "description": "WebSocket inbound channel scope. Use all to accept every visible channel, or selected to require websocketChannelIds."
+          },
+          "websocketUrl": {
+            "type": "string",
+            "description": "Optional explicit WebSocket URL. Defaults to the Infomaniak Echo socket URL or the Mattermost /api/v4/websocket URL based on websocketProtocol."
+          },
+          "websocketHost": {
+            "type": "string",
+            "default": "websocket.kchat.infomaniak.com",
+            "description": "Infomaniak Echo WebSocket host used when websocketProtocol is infomaniak-echo."
+          },
+          "websocketAppKey": {
+            "type": "string",
+            "default": "kchat-key",
+            "description": "Infomaniak Echo/Pusher app key used when websocketProtocol is infomaniak-echo."
+          },
+          "websocketAuthEndpoint": {
+            "type": "string",
+            "description": "Optional Infomaniak Echo private-channel auth endpoint. Defaults to <apiBaseUrl>/broadcasting/auth."
+          },
+          "websocketSubscriptions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Optional explicit Infomaniak Echo subscription channel names. Defaults to private-team.<team_id> and presence-teamUser.<user_id>."
+          },
+          "websocketTeamId": {
+            "type": "string",
+            "description": "Optional kChat team ID override for Infomaniak Echo subscriptions."
+          },
+          "websocketTeamUserId": {
+            "type": "string",
+            "description": "Optional kChat team user ID override for Infomaniak Echo subscriptions."
+          },
+          "websocketChannelIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Optional kChat channel IDs to accept from the WebSocket stream. When omitted, all visible posted events are accepted."
+          },
+          "websocketDedupeWindowMs": {
+            "type": "number",
+            "minimum": 0,
+            "default": 120000,
+            "description": "Milliseconds to suppress duplicate WebSocket posts by post id. Set to 0 to disable duplicate suppression."
+          },
+          "websocketDedupeMaxEntries": {
+            "type": "integer",
+            "minimum": 1,
+            "default": 10000,
+            "description": "Maximum number of WebSocket post ids kept in the duplicate suppression cache."
+          },
+          "websocketDispatchConcurrency": {
+            "type": "integer",
+            "minimum": 1,
+            "default": 1,
+            "description": "Maximum number of WebSocket post events dispatched into OpenClaw at the same time."
+          },
+          "websocketDispatchQueueSize": {
+            "type": "integer",
+            "minimum": 0,
+            "default": 100,
+            "description": "Maximum number of WebSocket post events waiting for dispatch before new events are dropped."
+          }
+        }
+      },
+      "uiHints": {
+        "name": {
+          "label": "Display name",
+          "placeholder": "Infomaniak kChat"
+        },
+        "tokenEnvName": {
+          "label": "Token environment variable",
+          "placeholder": "INFOMANIAK_TOKEN"
+        },
+        "teamName": {
+          "label": "Team name"
+        },
+        "apiBaseUrl": {
+          "label": "kChat API base URL",
+          "placeholder": "https://example-team.kchat.infomaniak.com"
+        },
+        "defaultChannel": {
+          "label": "Default channel",
+          "placeholder": "#general"
+        },
+        "typingIndicator": {
+          "label": "Typing indicator"
+        },
+        "setOnlineOnReplyStart": {
+          "label": "Set online on reply start"
+        },
+        "receiveMode": {
+          "label": "Inbound receive mode"
+        },
+        "websocketProtocol": {
+          "label": "WebSocket protocol"
+        },
+        "webhookPath": {
+          "label": "Webhook path",
+          "placeholder": "/channels/kchat/webhook"
+        },
+        "outgoingWebhookTokenEnvName": {
+          "label": "Outgoing webhook token environment variable",
+          "placeholder": "INFOMANIAK_KCHAT_OUTGOING_WEBHOOK_TOKEN"
+        },
+        "websocketUrl": {
+          "label": "WebSocket URL",
+          "placeholder": "wss://websocket.kchat.infomaniak.com/app/kchat-key?protocol=7&client=liquid-potassium&version=0.3.0&flash=false"
+        },
+        "websocketHost": {
+          "label": "WebSocket host",
+          "placeholder": "websocket.kchat.infomaniak.com"
+        },
+        "websocketAppKey": {
+          "label": "WebSocket app key",
+          "placeholder": "kchat-key"
+        },
+        "websocketAuthEndpoint": {
+          "label": "WebSocket auth endpoint",
+          "placeholder": "https://example-team.kchat.infomaniak.com/broadcasting/auth"
+        },
+        "websocketChannelScope": {
+          "label": "WebSocket channel scope"
+        },
+        "websocketSubscriptions": {
+          "label": "WebSocket subscriptions"
+        },
+        "websocketTeamId": {
+          "label": "WebSocket team ID"
+        },
+        "websocketTeamUserId": {
+          "label": "WebSocket team user ID"
+        },
+        "websocketChannelIds": {
+          "label": "WebSocket channel IDs"
+        },
+        "websocketDedupeWindowMs": {
+          "label": "WebSocket dedupe window (ms)"
+        },
+        "websocketDedupeMaxEntries": {
+          "label": "WebSocket dedupe max entries"
+        }
       }
     }
   }

@@ -1,40 +1,110 @@
-# potassium-openclaw
+# Potassium for OpenClaw
 
-OpenClaw plugin and skills for Infomaniak workflows backed by the `liquid-potassium` Node SDK.
+Potassium packages Infomaniak workflows for OpenClaw. It installs as a native
+OpenClaw plugin, registers Infomaniak tools backed by the published
+`liquid-potassium` SDK, and ships skills that help agents use those tools with
+the right safety defaults.
 
-This package no longer depends on an external executable. It registers native OpenClaw tools from `liquid-potassium` and ships skills that teach agents when to use those tools.
+It also includes a dedicated `kchat` OpenClaw channel for live Infomaniak kChat
+communication: outbound posts, inbound webhook or WebSocket events, threaded
+replies, typing indicators, and optional online presence.
 
-## License
+## Highlights
 
-This project is licensed under [Apache-2.0](LICENSE).
+- Native OpenClaw plugin. No external executable runtime and no vendored SDK
+  source.
+- Infomaniak tools for discovery, reviewed workflows, Mail application calls,
+  and raw API calls when policy allows them.
+- Skills for kDrive, Mail, kChat, URL shortener, and general Infomaniak tasks.
+- Dedicated kChat channel capability for post/reply workflows inside OpenClaw.
+- Environment-only credential handling. Direct bearer-token config is rejected.
+- Conservative mutation policy. Mutating operations are blocked by default.
+- Exact dependency pin on `liquid-potassium@0.3.0`.
 
-## Shape
+## Status
 
-- `index.js` registers the OpenClaw plugin and delegates tool construction to `liquid-potassium`.
-- `openclaw.plugin.json` declares the native plugin contract and tool names.
-- `.codex-plugin/plugin.json` keeps the Codex bundle metadata for local plugin development.
-- `skills/` provides task guidance for kDrive, Mail, kChat, URL shortener, and general Infomaniak workflows.
-- `docs/` records the architecture and dependency strategy.
-
-## Dependency
-
-`liquid-potassium` is consumed from npm and pinned to the published package version:
-
-```json
-"liquid-potassium": "0.2.0"
-```
-
-The published package includes built runtime output, so imports such as `liquid-potassium/openclaw/tools` work without install-time build scripts.
+This repository is the OpenClaw adapter and package layer for Infomaniak. The
+package metadata is ready for public npm publication, but the package is not
+published to npm or ClawHub yet. Install from a local checkout while developing,
+or from a pinned GitHub commit for regular use.
 
 ## Requirements
 
-- OpenClaw with native plugin support.
+- OpenClaw `2026.6.6` or newer.
 - Node.js 22 or newer.
-- `INFOMANIAK_TOKEN` available to the OpenClaw process, unless plugin config sets another `tokenEnvName`.
+- `INFOMANIAK_TOKEN` available to the OpenClaw process, unless plugin config
+  sets another `tokenEnvName`.
+
+## Install
+
+From this repository checkout:
+
+```sh
+openclaw plugins install --link .
+openclaw plugins enable potassium
+```
+
+From GitHub, pin a reviewed commit:
+
+```sh
+openclaw plugins install git:github.com/OpenCow42/potassium-openclaw@<commit-sha>
+openclaw plugins enable potassium
+```
+
+When replacing an existing copied install, pass `--force` to the same install
+command. Linked installs point directly at the checkout and do not need
+`--force`.
+
+If OpenClaw runs as a service, restart the gateway after installing or changing
+plugin code:
+
+```sh
+openclaw gateway restart
+```
+
+## Configure
+
+Default credential injection reads `INFOMANIAK_TOKEN`. Keep bearer/API tokens in
+environment variables only.
+
+```sh
+export INFOMANIAK_TOKEN="..."
+```
+
+Minimal explicit config:
+
+```sh
+openclaw config patch --stdin <<'JSON5'
+{
+  plugins: {
+    entries: {
+      potassium: {
+        enabled: true,
+        config: {
+          tokenEnvName: "INFOMANIAK_TOKEN",
+          blockMutating: true
+        }
+      }
+    }
+  }
+}
+JSON5
+```
+
+Useful plugin config fields:
+
+- `tokenEnvName`: environment variable name for the Infomaniak bearer token,
+  default `INFOMANIAK_TOKEN`.
+- `baseUrl`: optional Infomaniak API base URL override.
+- `mailApplicationBaseUrl`: optional Mail application API base URL override.
+- `allowedDomains`: optional domain allowlist.
+- `allowedOperations`: optional backing operation allowlist.
+- `deniedOperations`: optional backing operation denylist.
+- `blockMutating`: blocks mutating operations when `true`, default `true`.
 
 ## Tools
 
-The plugin registers these tools:
+Potassium registers these native OpenClaw tools:
 
 - `infomaniak_domains`
 - `infomaniak_search`
@@ -46,84 +116,46 @@ The plugin registers these tools:
 - `infomaniak_workflow_run`
 - `infomaniak_call`
 
-Prefer workflow tools for reviewed domain actions. Use search/describe/discover/call only when a reviewed workflow does not fit.
+Prefer reviewed workflow tools for domain actions. Use
+search/describe/discover/call only when a reviewed workflow does not fit.
 
-## Configuration
+## Skills
 
-Default credential injection reads `INFOMANIAK_TOKEN`. Direct bearer-token config is intentionally rejected by this adapter; use an environment variable instead. Supported plugin config includes:
+The package ships OpenClaw/Codex skill guidance under `skills/`:
 
-- `tokenEnvName`: environment variable name for the bearer token, default `INFOMANIAK_TOKEN`.
-- `baseUrl`: optional Infomaniak API base URL override.
-- `mailApplicationBaseUrl`: optional Mail application API base URL override.
-- `allowedDomains`: optional domain allowlist.
-- `allowedOperations`: optional backing operation allowlist.
-- `deniedOperations`: optional backing operation denylist.
-- `blockMutating`: defaults to `true`.
+- `potassium`: general Infomaniak tool selection and safety rules. See
+  [docs/potassium.md](docs/potassium.md).
+- `kdrive-writing`: kDrive workflows. See
+  [docs/kdrive-writing.md](docs/kdrive-writing.md).
+- `mail-handling`: Infomaniak Mail workflows. See
+  [docs/mail-handling.md](docs/mail-handling.md).
+- `kchat-posting`: kChat posting and channel guidance. See
+  [docs/kchat-channel.md](docs/kchat-channel.md).
+- `url-shortener`: URL shortener workflows. See
+  [docs/url-shortener.md](docs/url-shortener.md).
 
-Do not place bearer tokens in chat, docs, tests, OpenClaw config files, or committed config.
+## kChat Channel
 
-## Install in OpenClaw
+Potassium declares a dedicated OpenClaw channel capability named `kchat`. It can
+send messages to kChat, receive live events, and route OpenClaw replies back into
+the correct kChat channel or thread.
 
-The package is not published to npm or ClawHub yet. Install it from a local checkout while developing, or from a pinned GitHub commit for regular use.
+The channel supports:
 
-### 1. Prepare Credentials
+- outbound posts to `id:<channel_id>`, `#channel`, `channel`, or
+  `team/channel` destinations;
+- inbound receive modes: `webhook`, `websocket`, `both`, or `disabled`;
+- hosted Infomaniak Echo/Pusher WebSocket receive;
+- plain Mattermost WebSocket receive for compatible servers;
+- explicit all-channels or selected-channel WebSocket intake;
+- duplicate suppression and bounded dispatch queueing;
+- native typing indicators for replies;
+- optional online status updates when OpenClaw starts preparing a reply.
 
-Create an Infomaniak API token with the product scopes needed for the workflows you want to use, then expose it to the OpenClaw process:
+See [docs/kchat-channel.md](docs/kchat-channel.md) for setup, configuration,
+routing, and troubleshooting details.
 
-```sh
-export INFOMANIAK_TOKEN="..."
-```
-
-Keep the token out of chat, docs, committed config, and shell history. If OpenClaw runs as a long-lived service, make sure `INFOMANIAK_TOKEN` is present in that service environment before starting or restarting it.
-
-### 2. Install The Plugin
-
-From this repository checkout:
-
-```sh
-openclaw plugins install --link .
-```
-
-From GitHub, pin a reviewed commit:
-
-```sh
-openclaw plugins install git:github.com/OpenCow42/potassium-openclaw@<commit-sha>
-```
-
-Use `--force` with the same install command when replacing an existing install.
-
-### 3. Enable And Configure
-
-Enable the plugin:
-
-```sh
-openclaw plugins enable potassium
-```
-
-The default configuration reads `INFOMANIAK_TOKEN`, keeps mutating operations blocked, and leaves all supported domains available. To make those defaults explicit or to add policy constraints, patch OpenClaw config:
-
-```sh
-openclaw config patch --stdin <<'JSON5'
-{
-  plugins: {
-    entries: {
-      potassium: {
-        enabled: true,
-        config: {
-          tokenEnvName: "INFOMANIAK_TOKEN",
-          blockMutating: true,
-          allowedDomains: ["kdrive", "mail", "kchat", "urlShortener"]
-        }
-      }
-    }
-  }
-}
-JSON5
-```
-
-Omit `allowedDomains` to allow every supported Infomaniak domain. Keep `blockMutating: true` unless you intentionally want write-capable tools available; mutating tool calls still require explicit confirmation from the caller.
-
-### 4. Verify Setup
+## Verify
 
 Check the installed plugin and runtime registration:
 
@@ -133,7 +165,8 @@ openclaw plugins list --enabled
 openclaw doctor
 ```
 
-After verification, ask OpenClaw to use the Potassium skills for an Infomaniak task. The plugin should register the `infomaniak_*` tools listed above.
+After verification, ask OpenClaw to use the Potassium skills for an Infomaniak
+task. The plugin should register the `infomaniak_*` tools listed above.
 
 ## Local Development
 
@@ -143,8 +176,28 @@ npm test
 npm run check
 ```
 
-The default test suite uses metadata and mocked registration checks only. It does not call live Infomaniak APIs.
+The default test suite uses metadata and mocked registration checks only. It
+does not call live Infomaniak APIs.
+
+## Documentation
+
+- [Architecture](docs/architecture.md)
+- [Liquid Potassium Integration](docs/liquid-potassium-integration.md)
+- [kChat Channel](docs/kchat-channel.md)
+- [Potassium Skill](docs/potassium.md)
+- [kDrive Writing](docs/kdrive-writing.md)
+- [Mail Handling](docs/mail-handling.md)
+- [URL Shortener](docs/url-shortener.md)
 
 ## Security
 
-Please see [SECURITY.md](SECURITY.md) for supported branches, vulnerability reporting, and credential-handling expectations.
+Please see [SECURITY.md](SECURITY.md) for supported branches, vulnerability
+reporting, and credential-handling expectations.
+
+Bearer/API tokens and webhook verification tokens must stay in environment
+variables. Do not place them in chat, docs, tests, OpenClaw config files, or
+committed config.
+
+## License
+
+This project is licensed under [Apache-2.0](LICENSE).
