@@ -1,6 +1,7 @@
 import { buildJsonPluginConfigSchema, definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
 import { createChannelPluginBase } from "openclaw/plugin-sdk/channel-core";
 import { createMessageReceiptFromOutboundResults, defineChannelMessageAdapter } from "openclaw/plugin-sdk/channel-outbound";
+import { resolveThreadSessionKeys } from "openclaw/plugin-sdk/routing";
 import { isRequestBodyLimitError, readRequestBodyWithLimit, requestBodyErrorToText } from "openclaw/plugin-sdk/webhook-ingress";
 import {
   createInfomaniakClient,
@@ -485,6 +486,12 @@ export function createPotassiumKchatWebhookHandler(options = {}) {
         inbound,
       });
     } catch (error) {
+      if (isKchatInboundReplyRoutingError(error)) {
+        options.log?.warn?.(`kChat webhook dispatch dropped: ${error.message}`);
+        respondJson(res, 400, { ok: false, error: "missing_reply_channel" });
+        return true;
+      }
+
       options.log?.error?.(`kChat webhook dispatch failed: ${error instanceof Error ? error.message : String(error)}`);
       respondJson(res, 500, { ok: false, error: "dispatch_failed" });
       return true;
@@ -584,9 +591,10 @@ export async function dispatchKchatInboundWebhookEvent({ cfg, channelConfig, run
         raw: inbound.raw,
       }),
       resolveTurn: (input) => {
+        const replyRoute = resolveKchatInboundReplyRoute(inbound);
         const peer = {
           kind: "channel",
-          id: inbound.conversationId,
+          id: replyRoute.nativeChannelId,
         };
         const route = channelRuntime.routing?.resolveAgentRoute({
           cfg,
@@ -599,7 +607,10 @@ export async function dispatchKchatInboundWebhookEvent({ cfg, channelConfig, run
           throw new Error("OpenClaw channel route resolution is unavailable.");
         }
 
-        const replyTo = resolveKchatInboundReplyTo(inbound, channelConfig);
+        const threadSession = resolveKchatInboundThreadSession({
+          baseSessionKey: route.sessionKey,
+          threadRootId: replyRoute.threadRootId,
+        });
         const ctxPayload = channelRuntime.inbound.buildContext({
           channel: KCHAT_CHANNEL_ID,
           accountId,
@@ -609,26 +620,21 @@ export async function dispatchKchatInboundWebhookEvent({ cfg, channelConfig, run
           sender: inbound.sender,
           conversation: {
             kind: "channel",
-            id: inbound.conversationId,
+            id: replyRoute.nativeChannelId,
             ...(inbound.conversationLabel ? { label: inbound.conversationLabel } : {}),
-            ...(inbound.rootId ? { threadId: inbound.rootId } : {}),
-            ...(inbound.channelId ? { nativeChannelId: inbound.channelId } : {}),
+            ...(replyRoute.threadRootId ? { threadId: replyRoute.threadRootId } : {}),
+            nativeChannelId: replyRoute.nativeChannelId,
             routePeer: peer,
           },
           route: {
             agentId: route.agentId,
             accountId: route.accountId,
             routeSessionKey: route.sessionKey,
-            dispatchSessionKey: route.sessionKey,
+            dispatchSessionKey: threadSession.sessionKey,
+            ...(threadSession.parentSessionKey ? { parentSessionKey: threadSession.parentSessionKey } : {}),
             mainSessionKey: route.mainSessionKey,
           },
-          reply: {
-            to: replyTo,
-            ...(inbound.channelId ? { nativeChannelId: inbound.channelId } : {}),
-            ...(inbound.rootId ? { messageThreadId: inbound.rootId } : {}),
-            ...(!inbound.rootId && inbound.postId ? { replyToId: inbound.postId } : {}),
-            sourceReplyDeliveryMode: "thread",
-          },
+          reply: replyRoute.reply,
           message: {
             rawBody: input.rawText,
             body: input.rawText,
@@ -638,6 +644,7 @@ export async function dispatchKchatInboundWebhookEvent({ cfg, channelConfig, run
           },
           extra: {
             kchat: inbound.raw,
+            ...(replyRoute.threadRootId ? { KchatRootId: replyRoute.threadRootId } : {}),
           },
         });
 
@@ -653,9 +660,8 @@ export async function dispatchKchatInboundWebhookEvent({ cfg, channelConfig, run
           dispatchReplyWithBufferedBlockDispatcher: channelRuntime.reply.dispatchReplyWithBufferedBlockDispatcher,
           delivery: {
             durable: () => ({
-              to: replyTo,
-              ...(inbound.rootId ? { threadId: inbound.rootId } : {}),
-              ...(!inbound.rootId && inbound.postId ? { replyToId: inbound.postId } : {}),
+              to: replyRoute.to,
+              ...(replyRoute.threadRootId ? { threadId: replyRoute.threadRootId, replyToId: replyRoute.replyToId } : {}),
               requiredCapabilities: { text: true, replyTo: true, thread: true },
             }),
             deliver: async (payload) => {
@@ -666,28 +672,27 @@ export async function dispatchKchatInboundWebhookEvent({ cfg, channelConfig, run
 
               const result = await sendKchatText({
                 cfg,
-                to: replyTo,
+                to: replyRoute.to,
                 text,
-                ...(inbound.rootId ? { threadId: inbound.rootId } : {}),
-                ...(!inbound.rootId && inbound.postId ? { replyToId: inbound.postId } : {}),
+                ...(replyRoute.threadRootId ? { threadId: replyRoute.threadRootId, replyToId: replyRoute.replyToId } : {}),
               });
               return {
                 visibleReplySent: true,
                 messageIds: result.messageId ? [result.messageId] : [],
                 receipt: result.receipt,
-                ...(inbound.rootId ? { threadId: inbound.rootId } : {}),
-                ...(!inbound.rootId && inbound.postId ? { replyToId: inbound.postId } : {}),
+                nativeChannelId: replyRoute.nativeChannelId,
+                ...(replyRoute.threadRootId ? { threadId: replyRoute.threadRootId, replyToId: replyRoute.replyToId } : {}),
               };
             },
           },
           messageId: inbound.id,
           record: {
             updateLastRoute: {
-              sessionKey: route.sessionKey,
+              sessionKey: threadSession.sessionKey,
               channel: KCHAT_CHANNEL_ID,
-              to: replyTo,
+              to: replyRoute.to,
               accountId: route.accountId,
-              ...(inbound.rootId ? { threadId: inbound.rootId } : {}),
+              ...(replyRoute.threadRootId ? { threadId: replyRoute.threadRootId } : {}),
             },
           },
         };
@@ -836,6 +841,10 @@ export async function dispatchKchatWebSocketEvent({ cfg, channelConfig, runtime,
     return createKchatWebSocketDispatchDrop("invalid_payload", payload);
   }
 
+  if (!hasKchatInboundReplyRoute(inbound)) {
+    return createKchatWebSocketDispatchDrop("missing_reply_channel", payload);
+  }
+
   if (isDuplicateKchatWebSocketPost(payload, channelConfig, dedupeState)) {
     return createKchatWebSocketDispatchDrop("duplicate_post", payload);
   }
@@ -866,6 +875,10 @@ export async function dispatchKchatWebSocketPostEvent({ cfg, channelConfig, runt
   const inbound = normalizeKchatOutgoingWebhookPayload(payload);
   if (!inbound) {
     return createKchatWebSocketDispatchDrop("invalid_payload", payload);
+  }
+
+  if (!hasKchatInboundReplyRoute(inbound)) {
+    return createKchatWebSocketDispatchDrop("missing_reply_channel", payload);
   }
 
   if (isDuplicateKchatWebSocketPost(payload, channelConfig, dedupeState)) {
@@ -1412,21 +1425,50 @@ function resolveKchatWebhookTimestamp(payload) {
   return value > 0 && value < 10_000_000_000 ? value * 1000 : value;
 }
 
-function resolveKchatInboundReplyTo(inbound, channelConfig) {
-  if (inbound.channelId) {
-    return `id:${inbound.channelId}`;
+function hasKchatInboundReplyRoute(inbound) {
+  return Boolean(readOptionalString(inbound?.channelId));
+}
+
+function resolveKchatInboundReplyRoute(inbound) {
+  const nativeChannelId = readOptionalString(inbound?.channelId);
+  if (!nativeChannelId) {
+    throw createKchatInboundReplyRoutingError(
+      "kChat inbound payload did not include channel_id; refusing to use defaultChannel for inbound replies.",
+    );
   }
 
-  if (inbound.teamDomain && inbound.channelName) {
-    return `${inbound.teamDomain}/${inbound.channelName}`;
-  }
+  const threadRootId = readOptionalString(inbound.rootId) ?? readOptionalString(inbound.postId);
+  const to = `id:${nativeChannelId}`;
+  return {
+    to,
+    nativeChannelId,
+    threadRootId,
+    replyToId: threadRootId,
+    reply: {
+      to,
+      nativeChannelId,
+      ...(threadRootId ? { messageThreadId: threadRootId, replyToId: threadRootId } : {}),
+      sourceReplyDeliveryMode: "thread",
+    },
+  };
+}
 
-  if (inbound.channelName) {
-    const configuredTeamName = readOptionalString(channelConfig.teamName);
-    return configuredTeamName ? `${configuredTeamName}/${inbound.channelName}` : `#${inbound.channelName}`;
-  }
+function resolveKchatInboundThreadSession({ baseSessionKey, threadRootId }) {
+  return resolveThreadSessionKeys({
+    baseSessionKey,
+    threadId: threadRootId,
+    parentSessionKey: threadRootId ? baseSessionKey : undefined,
+  });
+}
 
-  throw new Error("kChat inbound payload did not include a reply channel.");
+function createKchatInboundReplyRoutingError(message) {
+  const error = new Error(message);
+  error.code = "KCHAT_INBOUND_MISSING_REPLY_CHANNEL";
+  return error;
+}
+
+function isKchatInboundReplyRoutingError(error) {
+  return isRecord(error) && error.code === "KCHAT_INBOUND_MISSING_REPLY_CHANNEL";
 }
 
 function formatKchatInboundFrom(inbound) {

@@ -4,6 +4,7 @@ import { join, relative } from "node:path";
 import { Readable } from "node:stream";
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { buildChannelInboundEventContext } from "openclaw/plugin-sdk/channel-inbound";
 
 const repositoryRoot = fileURLToPath(new URL("../", import.meta.url));
 const expectedToolNames = [
@@ -363,11 +364,189 @@ test("kChat inbound webhook dispatches valid JSON payloads through the channel r
   assert.equal(turn.ctxPayload.conversation.id, "channel-123");
   assert.equal(turn.ctxPayload.conversation.label, "main/general");
   assert.equal(turn.ctxPayload.conversation.threadId, "root-123");
+  assert.equal(turn.ctxPayload.conversation.nativeChannelId, "channel-123");
+  assert.equal(turn.ctxPayload.route.routeSessionKey, "session-channel-123");
+  assert.equal(turn.ctxPayload.route.dispatchSessionKey, "session-channel-123:thread:root-123");
+  assert.equal(turn.ctxPayload.route.parentSessionKey, "session-channel-123");
   assert.equal(turn.ctxPayload.reply.to, "id:channel-123");
   assert.equal(turn.ctxPayload.reply.messageThreadId, "root-123");
+  assert.equal(turn.ctxPayload.reply.replyToId, "root-123");
+  assert.equal(turn.ctxPayload.reply.nativeChannelId, "channel-123");
+  assert.equal(turn.ctxPayload.reply.sourceReplyDeliveryMode, "thread");
   assert.equal(turn.ctxPayload.message.bodyForAgent, "hello from kChat");
+  assert.deepEqual(turn.delivery.durable({ text: "agent reply" }, { kind: "final" }), {
+    to: "id:channel-123",
+    threadId: "root-123",
+    replyToId: "root-123",
+    requiredCapabilities: { text: true, replyTo: true, thread: true },
+  });
+  assert.deepEqual(turn.record.updateLastRoute, {
+    sessionKey: "session-channel-123:thread:root-123",
+    channel: "kchat",
+    to: "id:channel-123",
+    accountId: "default",
+    threadId: "root-123",
+  });
   assert.deepEqual(routeCalls[0].peer, { kind: "channel", id: "channel-123" });
   assert.equal(contextCalls.length, 1);
+});
+
+test("kChat inbound root posts reply in a thread under the original post", async () => {
+  const { dispatchKchatInboundWebhookEvent, normalizeKchatOutgoingWebhookPayload } = await import(
+    pathToFileURL(join(repositoryRoot, "index.js")).href
+  );
+  const inboundRuns = [];
+  const routeCalls = [];
+  const inbound = normalizeKchatOutgoingWebhookPayload({
+    channel_id: "question-channel",
+    channel_name: "questions",
+    team_domain: "main",
+    team_id: "team-123",
+    post_id: "root-post-123",
+    user_id: "user-123",
+    user_name: "alice",
+    text: "root question",
+  });
+
+  await dispatchKchatInboundWebhookEvent({
+    cfg: { channels: { kchat: { defaultChannel: "id:wrong-default-channel" } } },
+    channelConfig: { defaultChannel: "id:wrong-default-channel" },
+    runtime: createKchatRuntimeStub({ inboundRuns, routeCalls, realContext: true }),
+    inbound,
+  });
+
+  const turn = await inboundRuns[0].adapter.resolveTurn(inboundRuns[0].adapter.ingest());
+  assert.equal(turn.ctxPayload.To, "id:question-channel");
+  assert.equal(turn.ctxPayload.OriginatingTo, "id:question-channel");
+  assert.equal(turn.ctxPayload.NativeChannelId, "question-channel");
+  assert.equal(turn.ctxPayload.MessageThreadId, "root-post-123");
+  assert.equal(turn.ctxPayload.ReplyToId, "root-post-123");
+  assert.equal(turn.ctxPayload.SessionKey, "session-question-channel:thread:root-post-123");
+  assert.equal(turn.ctxPayload.ParentSessionKey, "session-question-channel");
+  assert.deepEqual(turn.delivery.durable({ text: "agent reply" }, { kind: "final" }), {
+    to: "id:question-channel",
+    threadId: "root-post-123",
+    replyToId: "root-post-123",
+    requiredCapabilities: { text: true, replyTo: true, thread: true },
+  });
+  assert.deepEqual(routeCalls[0].peer, { kind: "channel", id: "question-channel" });
+});
+
+test("kChat inbound channel_id overrides configured defaultChannel for replies", async () => {
+  const { dispatchKchatInboundWebhookEvent, normalizeKchatOutgoingWebhookPayload } = await import(
+    pathToFileURL(join(repositoryRoot, "index.js")).href
+  );
+  const inboundRuns = [];
+  const inbound = normalizeKchatOutgoingWebhookPayload({
+    channel_id: "actual-inbound-channel",
+    channel_name: "actual",
+    team_domain: "main",
+    post_id: "actual-post",
+    user_name: "alice",
+    text: "use this channel",
+  });
+
+  await dispatchKchatInboundWebhookEvent({
+    cfg: { channels: { kchat: { defaultChannel: "id:configured-default-channel" } } },
+    channelConfig: { defaultChannel: "id:configured-default-channel" },
+    runtime: createKchatRuntimeStub({ inboundRuns, realContext: true }),
+    inbound,
+  });
+
+  const turn = await inboundRuns[0].adapter.resolveTurn(inboundRuns[0].adapter.ingest());
+  assert.equal(turn.ctxPayload.To, "id:actual-inbound-channel");
+  assert.equal(turn.ctxPayload.OriginatingTo, "id:actual-inbound-channel");
+  assert.equal(turn.ctxPayload.NativeChannelId, "actual-inbound-channel");
+  assert.equal(turn.ctxPayload.MessageThreadId, "actual-post");
+  assert.equal(turn.ctxPayload.ReplyToId, "actual-post");
+  assert.equal(turn.delivery.durable({ text: "reply" }, { kind: "final" }).to, "id:actual-inbound-channel");
+});
+
+test("kChat inbound without channel_id fails safely instead of using defaultChannel", async () => {
+  const {
+    createPotassiumKchatWebhookHandler,
+    dispatchKchatInboundWebhookEvent,
+    normalizeKchatOutgoingWebhookPayload,
+    sendKchatText,
+  } = await import(pathToFileURL(join(repositoryRoot, "index.js")).href);
+  const inboundRuns = [];
+  const routeCalls = [];
+  const inbound = normalizeKchatOutgoingWebhookPayload({
+    channel_name: "general",
+    team_domain: "main",
+    post_id: "post-without-channel-id",
+    user_name: "alice",
+    text: "ambiguous inbound",
+  });
+
+  await dispatchKchatInboundWebhookEvent({
+    cfg: { channels: { kchat: { defaultChannel: "id:configured-default-channel" } } },
+    channelConfig: { defaultChannel: "id:configured-default-channel", teamName: "main" },
+    runtime: createKchatRuntimeStub({ inboundRuns, routeCalls }),
+    inbound,
+  });
+
+  assert.throws(
+    () => inboundRuns[0].adapter.resolveTurn(inboundRuns[0].adapter.ingest()),
+    /did not include channel_id/,
+  );
+  assert.equal(routeCalls.length, 0);
+
+  const handlerRuns = [];
+  const handlerRouteCalls = [];
+  const handlerRuntime = createKchatRuntimeStub({ inboundRuns: handlerRuns, routeCalls: handlerRouteCalls });
+  handlerRuntime.channel.inbound.run = async (params) => {
+    handlerRuns.push(params);
+    params.adapter.resolveTurn(params.adapter.ingest());
+  };
+  const handler = createPotassiumKchatWebhookHandler({
+    cfg: { channels: { kchat: { defaultChannel: "id:configured-default-channel" } } },
+    channelConfig: { defaultChannel: "id:configured-default-channel", teamName: "main" },
+    env: { INFOMANIAK_KCHAT_OUTGOING_WEBHOOK_TOKEN: "expected-placeholder" },
+    runtime: handlerRuntime,
+  });
+  const response = await invokeWebhookHandler(handler, {
+    contentType: "application/json",
+    body: JSON.stringify({
+      ["to" + "ken"]: "expected-placeholder",
+      channel_name: "general",
+      team_domain: "main",
+      post_id: "post-without-channel-id",
+      user_name: "alice",
+      text: "ambiguous inbound",
+    }),
+  });
+  assert.equal(response.statusCode, 400);
+  assert.deepEqual(JSON.parse(response.body), { ok: false, error: "missing_reply_channel" });
+  assert.equal(handlerRouteCalls.length, 0);
+
+  const calls = [];
+  const result = await sendKchatText(
+    {
+      cfg: { channels: { kchat: { defaultChannel: "id:configured-default-channel" } } },
+      text: "explicit outbound default",
+    },
+    {
+      client: {
+        kchat: {
+          async createpost(request) {
+            calls.push(request);
+            return { id: "outbound-post", channel_id: "configured-default-channel" };
+          },
+        },
+      },
+    },
+  );
+
+  assert.equal(result.messageId, "outbound-post");
+  assert.deepEqual(calls, [
+    {
+      body: {
+        channel_id: "configured-default-channel",
+        message: "explicit outbound default",
+      },
+    },
+  ]);
 });
 
 test("kChat inbound webhook rejects invalid tokens without dispatching", async () => {
@@ -626,6 +805,41 @@ test("kChat WebSocket helpers derive URLs and normalize posted events", async ()
   );
   assert.equal(inboundRuns.length, 1);
 
+  const missingChannelFrame = {
+    event: "posted",
+    data: {
+      channel_name: "test",
+      sender_name: "alice",
+      post: JSON.stringify({
+        id: "post-ws-missing-channel",
+        user_id: "user-123",
+        message: "missing channel id",
+        create_at: 1710000000000,
+      }),
+    },
+    broadcast: {
+      team_id: "team-123",
+    },
+    seq: 3,
+  };
+  assert.deepEqual(
+    await dispatchKchatWebSocketEvent({
+      cfg: { channels: { kchat: { teamName: "main-team", defaultChannel: "id:configured-default-channel" } } },
+      channelConfig: { teamName: "main-team", defaultChannel: "id:configured-default-channel" },
+      runtime: createKchatRuntimeStub({ inboundRuns }),
+      frame: missingChannelFrame,
+    }),
+    {
+      dispatched: false,
+      reason: "missing_reply_channel",
+      postId: "post-ws-missing-channel",
+      teamId: "team-123",
+      userId: "user-123",
+      userName: "alice",
+    },
+  );
+  assert.equal(inboundRuns.length, 1);
+
   const dedupeState = new Map();
   const duplicateRuns = [];
   assert.equal(
@@ -687,6 +901,97 @@ test("kChat WebSocket helpers derive URLs and normalize posted events", async ()
     true,
   );
   assert.equal(noDedupeRuns.length, 2);
+});
+
+test("kChat WebSocket inbound reply context preserves channel and thread roots", async () => {
+  const { dispatchKchatWebSocketEvent } = await import(pathToFileURL(join(repositoryRoot, "index.js")).href);
+
+  const threadedRuns = [];
+  const threadedFrame = {
+    event: "posted",
+    data: {
+      channel_name: "support",
+      sender_name: "alice",
+      post: JSON.stringify({
+        id: "reply-post-123",
+        root_id: "thread-root-123",
+        channel_id: "actual-support-channel",
+        user_id: "user-123",
+        message: "question in existing thread",
+        create_at: 1710000000000,
+      }),
+    },
+    broadcast: {
+      team_id: "team-123",
+    },
+    seq: 4,
+  };
+  assert.equal(
+    (
+      await dispatchKchatWebSocketEvent({
+        cfg: { channels: { kchat: { teamName: "main-team", defaultChannel: "id:wrong-default-channel" } } },
+        channelConfig: { teamName: "main-team", defaultChannel: "id:wrong-default-channel" },
+        runtime: createKchatRuntimeStub({ inboundRuns: threadedRuns, realContext: true }),
+        frame: threadedFrame,
+      })
+    ).dispatched,
+    true,
+  );
+  const threadedTurn = await threadedRuns[0].adapter.resolveTurn(threadedRuns[0].adapter.ingest());
+  assert.equal(threadedTurn.ctxPayload.To, "id:actual-support-channel");
+  assert.equal(threadedTurn.ctxPayload.NativeChannelId, "actual-support-channel");
+  assert.equal(threadedTurn.ctxPayload.MessageThreadId, "thread-root-123");
+  assert.equal(threadedTurn.ctxPayload.ReplyToId, "thread-root-123");
+  assert.equal(threadedTurn.ctxPayload.SessionKey, "session-actual-support-channel:thread:thread-root-123");
+  assert.deepEqual(threadedTurn.delivery.durable({ text: "agent reply" }, { kind: "final" }), {
+    to: "id:actual-support-channel",
+    threadId: "thread-root-123",
+    replyToId: "thread-root-123",
+    requiredCapabilities: { text: true, replyTo: true, thread: true },
+  });
+
+  const rootRuns = [];
+  const rootFrame = {
+    event: "posted",
+    data: {
+      channel_name: "support",
+      sender_name: "alice",
+      post: JSON.stringify({
+        id: "root-post-456",
+        channel_id: "actual-support-channel",
+        user_id: "user-123",
+        message: "new root question",
+        create_at: 1710000000000,
+      }),
+    },
+    broadcast: {
+      team_id: "team-123",
+    },
+    seq: 5,
+  };
+  assert.equal(
+    (
+      await dispatchKchatWebSocketEvent({
+        cfg: { channels: { kchat: { teamName: "main-team", defaultChannel: "id:wrong-default-channel" } } },
+        channelConfig: { teamName: "main-team", defaultChannel: "id:wrong-default-channel" },
+        runtime: createKchatRuntimeStub({ inboundRuns: rootRuns, realContext: true }),
+        frame: rootFrame,
+      })
+    ).dispatched,
+    true,
+  );
+  const rootTurn = await rootRuns[0].adapter.resolveTurn(rootRuns[0].adapter.ingest());
+  assert.equal(rootTurn.ctxPayload.To, "id:actual-support-channel");
+  assert.equal(rootTurn.ctxPayload.NativeChannelId, "actual-support-channel");
+  assert.equal(rootTurn.ctxPayload.MessageThreadId, "root-post-456");
+  assert.equal(rootTurn.ctxPayload.ReplyToId, "root-post-456");
+  assert.equal(rootTurn.ctxPayload.SessionKey, "session-actual-support-channel:thread:root-post-456");
+  assert.deepEqual(rootTurn.delivery.durable({ text: "agent reply" }, { kind: "final" }), {
+    to: "id:actual-support-channel",
+    threadId: "root-post-456",
+    replyToId: "root-post-456",
+    requiredCapabilities: { text: true, replyTo: true, thread: true },
+  });
 });
 
 test("kChat WebSocket connection authenticates and dispatches posted events", async () => {
@@ -1049,7 +1354,7 @@ async function invokeWebhookHandler(handler, { body, contentType }) {
   return response;
 }
 
-function createKchatRuntimeStub({ inboundRuns, routeCalls = [], contextCalls = [] }) {
+function createKchatRuntimeStub({ inboundRuns, routeCalls = [], contextCalls = [], realContext = false }) {
   return {
     channel: {
       inbound: {
@@ -1058,7 +1363,7 @@ function createKchatRuntimeStub({ inboundRuns, routeCalls = [], contextCalls = [
         },
         buildContext(params) {
           contextCalls.push(params);
-          return params;
+          return realContext ? buildChannelInboundEventContext(params) : params;
         },
       },
       routing: {
