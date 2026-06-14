@@ -123,11 +123,16 @@ search/describe/discover/call only when a reviewed workflow does not fit.
 
 The package ships OpenClaw/Codex skill guidance under `skills/`:
 
-- `potassium`: general Infomaniak tool selection and safety rules.
-- `kdrive-writing`: kDrive workflows.
-- `mail-handling`: Infomaniak Mail workflows.
-- `kchat-posting`: kChat posting and channel guidance.
-- `url-shortener`: URL shortener workflows.
+- `potassium`: general Infomaniak tool selection and safety rules. See
+  [docs/potassium.md](docs/potassium.md).
+- `kdrive-writing`: kDrive workflows. See
+  [docs/kdrive-writing.md](docs/kdrive-writing.md).
+- `mail-handling`: Infomaniak Mail workflows. See
+  [docs/mail-handling.md](docs/mail-handling.md).
+- `kchat-posting`: kChat posting and channel guidance. See
+  [docs/kchat-channel.md](docs/kchat-channel.md).
+- `url-shortener`: URL shortener workflows. See
+  [docs/url-shortener.md](docs/url-shortener.md).
 
 ## kChat Channel
 
@@ -179,6 +184,10 @@ does not call live Infomaniak APIs.
 - [Architecture](docs/architecture.md)
 - [Liquid Potassium Integration](docs/liquid-potassium-integration.md)
 - [kChat Channel](docs/kchat-channel.md)
+- [Potassium Skill](docs/potassium.md)
+- [kDrive Writing](docs/kdrive-writing.md)
+- [Mail Handling](docs/mail-handling.md)
+- [URL Shortener](docs/url-shortener.md)
 
 ## Security
 
