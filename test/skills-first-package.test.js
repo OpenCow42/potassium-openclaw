@@ -954,6 +954,48 @@ test("kChat inbound webhook rejects invalid tokens without dispatching", async (
   assert.equal(calls.length, 0);
 });
 
+test("kChat inbound webhook redacts dispatch failure logs", async () => {
+  const { createPotassiumKchatWebhookHandler } = await import(pathToFileURL(join(repositoryRoot, "index.js")).href);
+  const errors = [];
+  const handler = createPotassiumKchatWebhookHandler({
+    cfg: { channels: { kchat: { enabled: true } } },
+    channelConfig: {},
+    env: { INFOMANIAK_KCHAT_OUTGOING_WEBHOOK_TOKEN: "expected-placeholder" },
+    runtime: {
+      channel: {
+        inbound: {
+          async run() {
+            throw new Error("dispatch failed token=secret-token Bearer secret-token");
+          },
+        },
+      },
+    },
+    log: {
+      error(message) {
+        errors.push(message);
+      },
+    },
+  });
+
+  const response = await invokeWebhookHandler(handler, {
+    contentType: "application/json",
+    body: JSON.stringify({
+      token: "expected-placeholder",
+      channel_id: "channel-123",
+      post_id: "post-123",
+      user_id: "user-123",
+      text: "hello from kChat",
+    }),
+  });
+
+  assert.equal(response.statusCode, 500);
+  assert.deepEqual(JSON.parse(response.body), { ok: false, error: "dispatch_failed" });
+  assert.equal(errors.length, 1);
+  assert.match(errors[0], /token=\[redacted\]/);
+  assert.match(errors[0], /Bearer \[redacted\]/);
+  assert.equal(errors[0].includes("secret-token"), false);
+});
+
 test("kChat inbound webhook drops ignored users without dispatching", async () => {
   const { createPotassiumKchatWebhookHandler } = await import(pathToFileURL(join(repositoryRoot, "index.js")).href);
   const calls = [];
@@ -1579,6 +1621,68 @@ test("kChat WebSocket connection authenticates and dispatches posted events", as
   assert.match(debugLogs.join("\n"), /postId=post-ws-ignored/);
   assert.equal(debugLogs.join("\n").includes("this text must not be logged"), false);
   assert.equal(debugLogs.join("\n").includes("ignored sender text must not be logged"), false);
+
+  abortController.abort();
+  await connection;
+  assert.equal(socket.closed, true);
+});
+
+test("kChat WebSocket dispatch failure logs are redacted", async () => {
+  const { runKchatWebSocketConnection } = await import(pathToFileURL(join(repositoryRoot, "index.js")).href);
+  const errors = [];
+  const abortController = new AbortController();
+  MockWebSocket.instances = [];
+
+  const connection = runKchatWebSocketConnection({
+    cfg: { channels: { kchat: { teamName: "main-team", websocketProtocol: "mattermost", websocketChannelIds: ["channel-123"] } } },
+    channelConfig: { teamName: "main-team", websocketProtocol: "mattermost", websocketChannelIds: ["channel-123"] },
+    token: "placeholder-token",
+    WebSocketImpl: MockWebSocket,
+    runtime: {
+      channel: {
+        inbound: {
+          async run() {
+            throw new Error("dispatch failed token=secret-token Bearer secret-token");
+          },
+        },
+      },
+    },
+    abortSignal: abortController.signal,
+    log: {
+      error(message) {
+        errors.push(message);
+      },
+    },
+  });
+
+  await waitImmediate();
+  const socket = MockWebSocket.instances[0];
+  socket.emitMessage(JSON.stringify({ status: "OK", seq_reply: 1 }));
+  socket.emitMessage(
+    JSON.stringify({
+      event: "posted",
+      data: {
+        channel_name: "test",
+        sender_name: "alice",
+        post: JSON.stringify({
+          id: "post-ws-redacted-error",
+          channel_id: "channel-123",
+          user_id: "user-123",
+          message: "this message dispatch fails",
+          create_at: 1710000000000,
+        }),
+      },
+      broadcast: {
+        team_id: "team-123",
+      },
+      seq: 2,
+    }),
+  );
+
+  await waitForCondition(() => errors.length === 1);
+  assert.match(errors[0], /token=\[redacted\]/);
+  assert.match(errors[0], /Bearer \[redacted\]/);
+  assert.equal(errors[0].includes("secret-token"), false);
 
   abortController.abort();
   await connection;

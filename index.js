@@ -698,7 +698,7 @@ export function createPotassiumKchatWebhookHandler(options = {}) {
         return true;
       }
 
-      options.log?.error?.(`kChat webhook dispatch failed: ${error instanceof Error ? error.message : String(error)}`);
+      options.log?.error?.(`kChat webhook dispatch failed: ${formatKchatSafeError(error)}`);
       respondJson(res, 500, { ok: false, error: "dispatch_failed" });
       return true;
     }
@@ -1011,7 +1011,7 @@ export async function runKchatWebSocketConnection(options = {}) {
       options.onDispatchResult?.(result);
     },
     onError(error) {
-      options.log?.error?.(`kChat WebSocket dispatch failed: ${error instanceof Error ? error.message : String(error)}`);
+      options.log?.error?.(`kChat WebSocket dispatch failed: ${formatKchatSafeError(error)}`);
     },
   });
 
