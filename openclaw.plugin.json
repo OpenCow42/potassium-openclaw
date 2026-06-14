@@ -166,6 +166,14 @@
             },
             "description": "kChat usernames to ignore for inbound webhook events, typically the API posting account."
           },
+          "websocketChannelScope": {
+            "type": "string",
+            "enum": [
+              "all",
+              "selected"
+            ],
+            "description": "WebSocket inbound channel scope. Use all to accept every visible channel, or selected to require websocketChannelIds."
+          },
           "websocketUrl": {
             "type": "string",
             "description": "Optional explicit WebSocket URL. Defaults to the Infomaniak Echo socket URL or the Mattermost /api/v4/websocket URL based on websocketProtocol."
@@ -205,6 +213,12 @@
               "type": "string"
             },
             "description": "Optional kChat channel IDs to accept from the WebSocket stream. When omitted, all visible posted events are accepted."
+          },
+          "websocketDedupeWindowMs": {
+            "type": "number",
+            "minimum": 0,
+            "default": 120000,
+            "description": "Milliseconds to suppress duplicate WebSocket posts by post id. Set to 0 to disable duplicate suppression."
           }
         }
       },
@@ -258,6 +272,9 @@
           "label": "WebSocket auth endpoint",
           "placeholder": "https://example-team.kchat.infomaniak.com/broadcasting/auth"
         },
+        "websocketChannelScope": {
+          "label": "WebSocket channel scope"
+        },
         "websocketSubscriptions": {
           "label": "WebSocket subscriptions"
         },
@@ -269,6 +286,9 @@
         },
         "websocketChannelIds": {
           "label": "WebSocket channel IDs"
+        },
+        "websocketDedupeWindowMs": {
+          "label": "WebSocket dedupe window (ms)"
         }
       }
     }

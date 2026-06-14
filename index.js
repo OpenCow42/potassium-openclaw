@@ -23,6 +23,8 @@ const DEFAULT_KCHAT_WEBSOCKET_RECONNECT_INITIAL_MS = 1000;
 const DEFAULT_KCHAT_WEBSOCKET_RECONNECT_MAX_MS = 30000;
 const DEFAULT_KCHAT_WEBSOCKET_PROTOCOL = "infomaniak-echo";
 const KCHAT_WEBSOCKET_PROTOCOLS = new Set(["infomaniak-echo", "mattermost"]);
+const KCHAT_WEBSOCKET_CHANNEL_SCOPES = new Set(["all", "selected"]);
+const DEFAULT_KCHAT_WEBSOCKET_DEDUPE_WINDOW_MS = 120000;
 const DEFAULT_KCHAT_ECHO_WEBSOCKET_HOST = "websocket.kchat.infomaniak.com";
 const DEFAULT_KCHAT_ECHO_APP_KEY = "kchat-key";
 const KCHAT_CHANNEL_ID = "kchat";
@@ -100,6 +102,12 @@ export const PotassiumKchatChannelConfigJsonSchema = {
       },
       description: "kChat usernames to ignore for inbound webhook events, typically the API posting account.",
     },
+    websocketChannelScope: {
+      type: "string",
+      enum: ["all", "selected"],
+      description:
+        "WebSocket inbound channel scope. Use all to accept every visible channel, or selected to require websocketChannelIds.",
+    },
     websocketUrl: {
       type: "string",
       description:
@@ -142,6 +150,12 @@ export const PotassiumKchatChannelConfigJsonSchema = {
         type: "string",
       },
       description: "Optional kChat channel IDs to accept from the WebSocket stream. When omitted, all visible posted events are accepted.",
+    },
+    websocketDedupeWindowMs: {
+      type: "number",
+      minimum: 0,
+      default: DEFAULT_KCHAT_WEBSOCKET_DEDUPE_WINDOW_MS,
+      description: "Milliseconds to suppress duplicate WebSocket posts by post id. Set to 0 to disable duplicate suppression.",
     },
   },
 };
@@ -224,6 +238,7 @@ export const potassiumKchatChannelPlugin = {
         const outgoingWebhookTokenEnvName = readOptionalString(inputRecord.outgoingWebhookTokenEnvName);
         const ignoredUserIds = readOptionalStringArray(inputRecord.ignoredUserIds);
         const ignoredUserNames = readOptionalStringArray(inputRecord.ignoredUserNames);
+        const websocketChannelScope = readOptionalString(inputRecord.websocketChannelScope);
         const websocketUrl = readOptionalString(inputRecord.websocketUrl);
         const websocketHost = readOptionalString(inputRecord.websocketHost);
         const websocketAppKey = readOptionalString(inputRecord.websocketAppKey);
@@ -232,6 +247,7 @@ export const potassiumKchatChannelPlugin = {
         const websocketTeamId = readOptionalString(inputRecord.websocketTeamId);
         const websocketTeamUserId = readOptionalString(inputRecord.websocketTeamUserId);
         const websocketChannelIds = readOptionalStringArray(inputRecord.websocketChannelIds);
+        const websocketDedupeWindowMs = readOptionalNumber(inputRecord.websocketDedupeWindowMs);
 
         return {
           ...config,
@@ -252,6 +268,7 @@ export const potassiumKchatChannelPlugin = {
               ...(outgoingWebhookTokenEnvName ? { outgoingWebhookTokenEnvName } : {}),
               ...(ignoredUserIds ? { ignoredUserIds } : {}),
               ...(ignoredUserNames ? { ignoredUserNames } : {}),
+              ...(isKnownKchatWebSocketChannelScope(websocketChannelScope) ? { websocketChannelScope } : {}),
               ...(websocketUrl ? { websocketUrl } : {}),
               ...(websocketHost ? { websocketHost } : {}),
               ...(websocketAppKey ? { websocketAppKey } : {}),
@@ -260,6 +277,7 @@ export const potassiumKchatChannelPlugin = {
               ...(websocketTeamId ? { websocketTeamId } : {}),
               ...(websocketTeamUserId ? { websocketTeamUserId } : {}),
               ...(websocketChannelIds ? { websocketChannelIds } : {}),
+              ...(websocketDedupeWindowMs === undefined ? {} : { websocketDedupeWindowMs }),
             },
           },
         };
@@ -684,6 +702,7 @@ export async function startKchatWebSocketGatewayAccount(options = {}) {
   const reconnectInitialMs =
     readOptionalNumber(channelConfig.websocketReconnectInitialMs) ?? DEFAULT_KCHAT_WEBSOCKET_RECONNECT_INITIAL_MS;
   const reconnectMaxMs = readOptionalNumber(channelConfig.websocketReconnectMaxMs) ?? DEFAULT_KCHAT_WEBSOCKET_RECONNECT_MAX_MS;
+  const dedupeState = new Map();
   let reconnectDelayMs = reconnectInitialMs;
 
   if (!token) {
@@ -697,6 +716,7 @@ export async function startKchatWebSocketGatewayAccount(options = {}) {
         channelConfig,
         token,
         runtime: options.runtime ?? { channel: options.channelRuntime },
+        dedupeState,
       });
       reconnectDelayMs = reconnectInitialMs;
     } catch (error) {
@@ -736,9 +756,9 @@ export async function runKchatWebSocketConnection(options = {}) {
   const websocketSubscriptions = readOptionalStringArray(channelConfig.websocketSubscriptions);
   const websocketTeamId = readOptionalString(channelConfig.websocketTeamId);
   const websocketTeamUserId = readOptionalString(channelConfig.websocketTeamUserId);
-  const websocketChannelIds = readOptionalStringArray(channelConfig.websocketChannelIds);
-  const ignoredUserIds = readOptionalStringArray(channelConfig.ignoredUserIds);
-  const ignoredUserNames = readOptionalStringArray(channelConfig.ignoredUserNames);
+  const dedupeState = options.dedupeState ?? new Map();
+
+  resolveKchatWebSocketChannelScope(channelConfig);
 
   return await runLiquidKchatWebSocketConnection({
     protocol: resolveKchatWebSocketProtocol(channelConfig),
@@ -755,9 +775,6 @@ export async function runKchatWebSocketConnection(options = {}) {
     ...(websocketSubscriptions ? { subscriptions: websocketSubscriptions } : {}),
     ...(websocketTeamId ? { teamId: websocketTeamId } : {}),
     ...(websocketTeamUserId ? { teamUserId: websocketTeamUserId } : {}),
-    ...(websocketChannelIds ? { channelIds: websocketChannelIds } : {}),
-    ...(ignoredUserIds ? { ignoredUserIds } : {}),
-    ...(ignoredUserNames ? { ignoredUserNames } : {}),
     onFrame: options.onFrame,
     onAuthenticated: options.onAuthenticated,
     onSubscribed: options.onSubscribed,
@@ -768,8 +785,10 @@ export async function runKchatWebSocketConnection(options = {}) {
         channelConfig,
         runtime: options.runtime,
         event,
+        dedupeState,
       })
         .then((result) => {
+          logKchatWebSocketDispatchResult(result, options.log);
           options.onDispatchResult?.(result);
         })
         .catch((error) => {
@@ -798,23 +817,27 @@ export function resolveKchatWebSocketUrl(channelConfig) {
   });
 }
 
-export async function dispatchKchatWebSocketEvent({ cfg, channelConfig, runtime, frame }) {
+export async function dispatchKchatWebSocketEvent({ cfg, channelConfig, runtime, frame, dedupeState }) {
   const payload = normalizeKchatWebSocketPostEvent(frame, channelConfig);
   if (!payload) {
     return { dispatched: false, reason: "unsupported_event" };
   }
 
   if (!isAllowedKchatWebSocketChannel(payload, channelConfig)) {
-    return { dispatched: false, reason: "ignored_channel" };
+    return createKchatWebSocketDispatchDrop("ignored_channel", payload);
   }
 
   if (shouldIgnoreKchatWebhookPayload(payload, channelConfig)) {
-    return { dispatched: false, reason: "ignored_sender" };
+    return createKchatWebSocketDispatchDrop("ignored_sender", payload);
   }
 
   const inbound = normalizeKchatOutgoingWebhookPayload(payload);
   if (!inbound) {
-    return { dispatched: false, reason: "invalid_payload" };
+    return createKchatWebSocketDispatchDrop("invalid_payload", payload);
+  }
+
+  if (isDuplicateKchatWebSocketPost(payload, channelConfig, dedupeState)) {
+    return createKchatWebSocketDispatchDrop("duplicate_post", payload);
   }
 
   await dispatchKchatInboundWebhookEvent({
@@ -823,26 +846,30 @@ export async function dispatchKchatWebSocketEvent({ cfg, channelConfig, runtime,
     runtime,
     inbound,
   });
-  return { dispatched: true, inboundId: inbound.id };
+  return createKchatWebSocketDispatchSuccess(inbound);
 }
 
-export async function dispatchKchatWebSocketPostEvent({ cfg, channelConfig, runtime, event }) {
+export async function dispatchKchatWebSocketPostEvent({ cfg, channelConfig, runtime, event, dedupeState }) {
   const payload = normalizeKchatWebSocketPostEventPayload(event, channelConfig);
   if (!payload) {
     return { dispatched: false, reason: "unsupported_event" };
   }
 
   if (!isAllowedKchatWebSocketChannel(payload, channelConfig)) {
-    return { dispatched: false, reason: "ignored_channel" };
+    return createKchatWebSocketDispatchDrop("ignored_channel", payload);
   }
 
   if (shouldIgnoreKchatWebhookPayload(payload, channelConfig)) {
-    return { dispatched: false, reason: "ignored_sender" };
+    return createKchatWebSocketDispatchDrop("ignored_sender", payload);
   }
 
   const inbound = normalizeKchatOutgoingWebhookPayload(payload);
   if (!inbound) {
-    return { dispatched: false, reason: "invalid_payload" };
+    return createKchatWebSocketDispatchDrop("invalid_payload", payload);
+  }
+
+  if (isDuplicateKchatWebSocketPost(payload, channelConfig, dedupeState)) {
+    return createKchatWebSocketDispatchDrop("duplicate_post", payload);
   }
 
   await dispatchKchatInboundWebhookEvent({
@@ -851,7 +878,7 @@ export async function dispatchKchatWebSocketPostEvent({ cfg, channelConfig, runt
     runtime,
     inbound,
   });
-  return { dispatched: true, inboundId: inbound.id };
+  return createKchatWebSocketDispatchSuccess(inbound);
 }
 
 export function normalizeKchatWebSocketPostEvent(frame, channelConfig = {}) {
@@ -889,6 +916,60 @@ function normalizeKchatWebSocketPostEventPayload(event, channelConfig = {}) {
     ...(text ? { text } : {}),
     ...(createAt === undefined ? {} : { create_at: createAt }),
   };
+}
+
+function createKchatWebSocketDispatchDrop(reason, payload) {
+  return {
+    dispatched: false,
+    reason,
+    ...createKchatWebSocketDispatchMetadata(payload),
+  };
+}
+
+function createKchatWebSocketDispatchSuccess(inbound) {
+  return {
+    dispatched: true,
+    inboundId: inbound.id,
+    postId: inbound.postId ?? inbound.id,
+    ...(inbound.channelId ? { channelId: inbound.channelId } : {}),
+    ...(inbound.teamId ? { teamId: inbound.teamId } : {}),
+    ...(inbound.sender.id ? { userId: inbound.sender.id } : {}),
+    ...(inbound.sender.username ? { userName: inbound.sender.username } : {}),
+  };
+}
+
+function createKchatWebSocketDispatchMetadata(payload) {
+  const postId = readOptionalString(payload.post_id) ?? readOptionalString(payload.postId) ?? readOptionalString(payload.id);
+  const channelId = readOptionalString(payload.channel_id) ?? readOptionalString(payload.channelId);
+  const teamId = readOptionalString(payload.team_id) ?? readOptionalString(payload.teamId);
+  const userId = readOptionalString(payload.user_id) ?? readOptionalString(payload.userId);
+  const userName = readOptionalString(payload.user_name) ?? readOptionalString(payload.userName);
+
+  return {
+    ...(postId ? { postId } : {}),
+    ...(channelId ? { channelId } : {}),
+    ...(teamId ? { teamId } : {}),
+    ...(userId ? { userId } : {}),
+    ...(userName ? { userName } : {}),
+  };
+}
+
+function logKchatWebSocketDispatchResult(result, log) {
+  if (result?.dispatched !== false) {
+    return;
+  }
+
+  const reason = readOptionalString(result.reason) ?? "unknown";
+  const fields = [
+    ["postId", result.postId],
+    ["channelId", result.channelId],
+    ["teamId", result.teamId],
+    ["userId", result.userId],
+    ["userName", result.userName],
+  ]
+    .map(([key, value]) => (readOptionalString(value) ? `${key}=${value}` : undefined))
+    .filter(Boolean);
+  log?.debug?.(`kChat WebSocket event dropped: reason=${reason}${fields.length > 0 ? ` ${fields.join(" ")}` : ""}`);
 }
 
 function withoutDirectTokenConfig(schema) {
@@ -1007,6 +1088,10 @@ function resolveKchatWebSocketProtocol(channelConfig) {
 
 function isKnownKchatWebSocketProtocol(protocol) {
   return protocol !== undefined && KCHAT_WEBSOCKET_PROTOCOLS.has(protocol);
+}
+
+function isKnownKchatWebSocketChannelScope(scope) {
+  return scope !== undefined && KCHAT_WEBSOCKET_CHANNEL_SCOPES.has(scope);
 }
 
 function resolveKchatWebhookPath(channelConfig) {
@@ -1231,13 +1316,63 @@ function normalizeParsedKchatPayload(parsed) {
 }
 
 function isAllowedKchatWebSocketChannel(payload, channelConfig) {
-  const allowedChannelIds = readOptionalStringArray(channelConfig.websocketChannelIds) ?? [];
-  if (allowedChannelIds.length === 0) {
+  const channelScope = resolveKchatWebSocketChannelScope(channelConfig);
+  if (channelScope.scope === "all") {
     return true;
   }
 
   const channelId = readOptionalString(payload.channel_id) ?? readOptionalString(payload.channelId);
-  return Boolean(channelId && allowedChannelIds.includes(channelId));
+  return Boolean(channelId && channelScope.channelIds.includes(channelId));
+}
+
+function resolveKchatWebSocketChannelScope(channelConfig) {
+  const configuredScope = readOptionalString(channelConfig.websocketChannelScope);
+  if (configuredScope && !isKnownKchatWebSocketChannelScope(configuredScope)) {
+    throw new Error('channels.kchat.websocketChannelScope must be "all" or "selected".');
+  }
+
+  const channelIds = readOptionalStringArray(channelConfig.websocketChannelIds) ?? [];
+  if (configuredScope === "all") {
+    return { scope: "all", channelIds: [] };
+  }
+
+  if (configuredScope === "selected") {
+    if (channelIds.length === 0) {
+      throw new Error('channels.kchat.websocketChannelScope="selected" requires at least one websocketChannelIds entry.');
+    }
+    return { scope: "selected", channelIds };
+  }
+
+  return channelIds.length > 0 ? { scope: "selected", channelIds } : { scope: "all", channelIds: [] };
+}
+
+function isDuplicateKchatWebSocketPost(payload, channelConfig, dedupeState, now = Date.now()) {
+  if (!(dedupeState instanceof Map)) {
+    return false;
+  }
+
+  const windowMs = readOptionalNumber(channelConfig.websocketDedupeWindowMs) ?? DEFAULT_KCHAT_WEBSOCKET_DEDUPE_WINDOW_MS;
+  if (windowMs <= 0) {
+    return false;
+  }
+
+  const postId = readOptionalString(payload.post_id) ?? readOptionalString(payload.postId) ?? readOptionalString(payload.id);
+  if (!postId) {
+    return false;
+  }
+
+  for (const [seenPostId, seenAt] of dedupeState) {
+    if (now - seenAt > windowMs) {
+      dedupeState.delete(seenPostId);
+    }
+  }
+
+  if (dedupeState.has(postId)) {
+    return true;
+  }
+
+  dedupeState.set(postId, now);
+  return false;
 }
 
 async function sleepWithAbort(ms, abortSignal) {

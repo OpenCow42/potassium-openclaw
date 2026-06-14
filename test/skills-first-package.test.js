@@ -18,6 +18,7 @@ const expectedToolNames = [
   "infomaniak_call",
 ];
 const expectedChannelIds = ["kchat"];
+const websocketFixtureToken = "fixture";
 const dangerousRuntimeImports = [
   ["node:child", "_process"].join(""),
   ["child", "_process"].join(""),
@@ -73,6 +74,7 @@ test("package declares a native OpenClaw plugin backed by the published liquid-p
   );
   assert.equal(nativeManifest.channelConfigs?.kchat?.schema?.properties?.ignoredUserIds?.items?.type, "string");
   assert.equal(nativeManifest.channelConfigs?.kchat?.schema?.properties?.ignoredUserNames?.items?.type, "string");
+  assert.deepEqual(nativeManifest.channelConfigs?.kchat?.schema?.properties?.websocketChannelScope?.enum, ["all", "selected"]);
   assert.equal(nativeManifest.channelConfigs?.kchat?.schema?.properties?.websocketUrl?.type, "string");
   assert.equal(nativeManifest.channelConfigs?.kchat?.schema?.properties?.websocketHost?.default, "websocket.kchat.infomaniak.com");
   assert.equal(nativeManifest.channelConfigs?.kchat?.schema?.properties?.websocketAppKey?.default, "kchat-key");
@@ -81,6 +83,7 @@ test("package declares a native OpenClaw plugin backed by the published liquid-p
   assert.equal(nativeManifest.channelConfigs?.kchat?.schema?.properties?.websocketTeamId?.type, "string");
   assert.equal(nativeManifest.channelConfigs?.kchat?.schema?.properties?.websocketTeamUserId?.type, "string");
   assert.equal(nativeManifest.channelConfigs?.kchat?.schema?.properties?.websocketChannelIds?.items?.type, "string");
+  assert.equal(nativeManifest.channelConfigs?.kchat?.schema?.properties?.websocketDedupeWindowMs?.default, 120000);
 
   assert.equal(codexManifest.name, "potassium");
   assert.equal(codexManifest.license, "Apache-2.0");
@@ -573,9 +576,36 @@ test("kChat WebSocket helpers derive URLs and normalize posted events", async ()
       runtime: createKchatRuntimeStub({ inboundRuns }),
       frame,
     }),
-    { dispatched: false, reason: "ignored_channel" },
+    {
+      dispatched: false,
+      reason: "ignored_channel",
+      postId: "post-ws-123",
+      channelId: "channel-123",
+      teamId: "team-123",
+      userId: "user-123",
+      userName: "alice",
+    },
   );
   assert.equal(inboundRuns.length, 0);
+
+  assert.deepEqual(
+    await dispatchKchatWebSocketEvent({
+      cfg: { channels: { kchat: { teamName: "main-team", websocketChannelScope: "all", websocketChannelIds: ["other-channel"] } } },
+      channelConfig: { teamName: "main-team", websocketChannelScope: "all", websocketChannelIds: ["other-channel"] },
+      runtime: createKchatRuntimeStub({ inboundRuns }),
+      frame,
+    }),
+    {
+      dispatched: true,
+      inboundId: "post-ws-123",
+      postId: "post-ws-123",
+      channelId: "channel-123",
+      teamId: "team-123",
+      userId: "user-123",
+      userName: "alice",
+    },
+  );
+  assert.equal(inboundRuns.length, 1);
 
   assert.deepEqual(
     await dispatchKchatWebSocketEvent({
@@ -584,25 +614,111 @@ test("kChat WebSocket helpers derive URLs and normalize posted events", async ()
       runtime: createKchatRuntimeStub({ inboundRuns }),
       frame,
     }),
-    { dispatched: false, reason: "ignored_sender" },
+    {
+      dispatched: false,
+      reason: "ignored_sender",
+      postId: "post-ws-123",
+      channelId: "channel-123",
+      teamId: "team-123",
+      userId: "user-123",
+      userName: "alice",
+    },
   );
-  assert.equal(inboundRuns.length, 0);
+  assert.equal(inboundRuns.length, 1);
+
+  const dedupeState = new Map();
+  const duplicateRuns = [];
+  assert.equal(
+    (
+      await dispatchKchatWebSocketEvent({
+        cfg: { channels: { kchat: { teamName: "main-team" } } },
+        channelConfig: { teamName: "main-team" },
+        runtime: createKchatRuntimeStub({ inboundRuns: duplicateRuns }),
+        frame,
+        dedupeState,
+      })
+    ).dispatched,
+    true,
+  );
+  assert.deepEqual(
+    await dispatchKchatWebSocketEvent({
+      cfg: { channels: { kchat: { teamName: "main-team" } } },
+      channelConfig: { teamName: "main-team" },
+      runtime: createKchatRuntimeStub({ inboundRuns: duplicateRuns }),
+      frame,
+      dedupeState,
+    }),
+    {
+      dispatched: false,
+      reason: "duplicate_post",
+      postId: "post-ws-123",
+      channelId: "channel-123",
+      teamId: "team-123",
+      userId: "user-123",
+      userName: "alice",
+    },
+  );
+  assert.equal(duplicateRuns.length, 1);
+
+  const noDedupeRuns = [];
+  const noDedupeState = new Map();
+  assert.equal(
+    (
+      await dispatchKchatWebSocketEvent({
+        cfg: { channels: { kchat: { teamName: "main-team", websocketDedupeWindowMs: 0 } } },
+        channelConfig: { teamName: "main-team", websocketDedupeWindowMs: 0 },
+        runtime: createKchatRuntimeStub({ inboundRuns: noDedupeRuns }),
+        frame,
+        dedupeState: noDedupeState,
+      })
+    ).dispatched,
+    true,
+  );
+  assert.equal(
+    (
+      await dispatchKchatWebSocketEvent({
+        cfg: { channels: { kchat: { teamName: "main-team", websocketDedupeWindowMs: 0 } } },
+        channelConfig: { teamName: "main-team", websocketDedupeWindowMs: 0 },
+        runtime: createKchatRuntimeStub({ inboundRuns: noDedupeRuns }),
+        frame,
+        dedupeState: noDedupeState,
+      })
+    ).dispatched,
+    true,
+  );
+  assert.equal(noDedupeRuns.length, 2);
 });
 
 test("kChat WebSocket connection authenticates and dispatches posted events", async () => {
   const { runKchatWebSocketConnection } = await import(pathToFileURL(join(repositoryRoot, "index.js")).href);
   const inboundRuns = [];
   const dispatchResults = [];
+  const debugLogs = [];
   const abortController = new AbortController();
   MockWebSocket.instances = [];
 
+  await assert.rejects(
+    runKchatWebSocketConnection({
+      cfg: { channels: { kchat: { teamName: "main-team", websocketChannelScope: "selected" } } },
+      channelConfig: { teamName: "main-team", websocketChannelScope: "selected" },
+      token: websocketFixtureToken,
+      WebSocketImpl: MockWebSocket,
+    }),
+    /websocketChannelScope="selected" requires/,
+  );
+
   const connection = runKchatWebSocketConnection({
-    cfg: { channels: { kchat: { teamName: "main-team", websocketProtocol: "mattermost", websocketChannelIds: ["channel-123"] } } },
-    channelConfig: { teamName: "main-team", websocketProtocol: "mattermost", websocketChannelIds: ["channel-123"] },
+    cfg: { channels: { kchat: { teamName: "main-team", websocketProtocol: "mattermost", websocketChannelIds: ["channel-123"], ignoredUserIds: ["ignored-user"] } } },
+    channelConfig: { teamName: "main-team", websocketProtocol: "mattermost", websocketChannelIds: ["channel-123"], ignoredUserIds: ["ignored-user"] },
     token: "placeholder-token",
     WebSocketImpl: MockWebSocket,
     runtime: createKchatRuntimeStub({ inboundRuns }),
     abortSignal: abortController.signal,
+    log: {
+      debug(message) {
+        debugLogs.push(message);
+      },
+    },
     onDispatchResult(result) {
       dispatchResults.push(result);
     },
@@ -623,6 +739,46 @@ test("kChat WebSocket connection authenticates and dispatches posted events", as
     JSON.stringify({
       status: "OK",
       seq_reply: 1,
+    }),
+  );
+  socket.emitMessage(
+    JSON.stringify({
+      event: "posted",
+      data: {
+        channel_name: "other",
+        sender_name: "alice",
+        post: JSON.stringify({
+          id: "post-ws-ignored",
+          channel_id: "other-channel",
+          user_id: "user-123",
+          message: "this text must not be logged",
+          create_at: 1710000000000,
+        }),
+      },
+      broadcast: {
+        team_id: "team-123",
+      },
+      seq: 2,
+    }),
+  );
+  socket.emitMessage(
+    JSON.stringify({
+      event: "posted",
+      data: {
+        channel_name: "test",
+        sender_name: "bob",
+        post: JSON.stringify({
+          id: "post-ws-ignored-sender",
+          channel_id: "channel-123",
+          user_id: "ignored-user",
+          message: "ignored sender text must not be logged",
+          create_at: 1710000000000,
+        }),
+      },
+      broadcast: {
+        team_id: "team-123",
+      },
+      seq: 2,
     }),
   );
   socket.emitMessage(
@@ -650,7 +806,40 @@ test("kChat WebSocket connection authenticates and dispatches posted events", as
   assert.equal(inboundRuns.length, 1);
   assert.equal(inboundRuns[0].raw.text, "ping from websocket");
   assert.equal(inboundRuns[0].raw.post_id, "post-ws-456");
-  assert.deepEqual(dispatchResults, [{ dispatched: true, inboundId: "post-ws-456" }]);
+  assert.deepEqual(dispatchResults, [
+    {
+      dispatched: false,
+      reason: "ignored_channel",
+      postId: "post-ws-ignored",
+      channelId: "other-channel",
+      teamId: "team-123",
+      userId: "user-123",
+      userName: "alice",
+    },
+    {
+      dispatched: false,
+      reason: "ignored_sender",
+      postId: "post-ws-ignored-sender",
+      channelId: "channel-123",
+      teamId: "team-123",
+      userId: "ignored-user",
+      userName: "bob",
+    },
+    {
+      dispatched: true,
+      inboundId: "post-ws-456",
+      postId: "post-ws-456",
+      channelId: "channel-123",
+      teamId: "team-123",
+      userId: "user-123",
+      userName: "alice",
+    },
+  ]);
+  assert.match(debugLogs.join("\n"), /reason=ignored_channel/);
+  assert.match(debugLogs.join("\n"), /reason=ignored_sender/);
+  assert.match(debugLogs.join("\n"), /postId=post-ws-ignored/);
+  assert.equal(debugLogs.join("\n").includes("this text must not be logged"), false);
+  assert.equal(debugLogs.join("\n").includes("ignored sender text must not be logged"), false);
 
   abortController.abort();
   await connection;
@@ -758,7 +947,17 @@ test("kChat Infomaniak Echo WebSocket subscribes and dispatches posted events", 
   assert.equal(inboundRuns.length, 1);
   assert.equal(inboundRuns[0].raw.text, "ping from echo");
   assert.equal(inboundRuns[0].raw.post_id, "post-echo-123");
-  assert.deepEqual(dispatchResults, [{ dispatched: true, inboundId: "post-echo-123" }]);
+  assert.deepEqual(dispatchResults, [
+    {
+      dispatched: true,
+      inboundId: "post-echo-123",
+      postId: "post-echo-123",
+      channelId: "channel-123",
+      teamId: "team-123",
+      userId: "user-123",
+      userName: "alice",
+    },
+  ]);
 
   abortController.abort();
   await connection;
