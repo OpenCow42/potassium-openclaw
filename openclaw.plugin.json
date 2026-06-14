@@ -142,6 +142,26 @@
             "default": "webhook",
             "description": "Inbound receive mode. Use websocket to receive kChat/Mattermost events without a public webhook callback URL."
           },
+          "responseMode": {
+            "type": "string",
+            "enum": [
+              "mentions",
+              "all"
+            ],
+            "default": "mentions",
+            "description": "Inbound response mode preference. Use mentions to respond only when addressed, or all to respond to every accepted inbound message."
+          },
+          "mentionAliases": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Additional complete mention or address aliases that should be treated as addressing this kChat account."
+          },
+          "ignoreSelfMessages": {
+            "type": "boolean",
+            "description": "Whether inbound kChat messages from the authenticated account should be ignored."
+          },
           "websocketProtocol": {
             "type": "string",
             "enum": [
@@ -278,6 +298,15 @@
         },
         "receiveMode": {
           "label": "Inbound receive mode"
+        },
+        "responseMode": {
+          "label": "Response mode"
+        },
+        "mentionAliases": {
+          "label": "Mention aliases"
+        },
+        "ignoreSelfMessages": {
+          "label": "Ignore self messages"
         },
         "websocketProtocol": {
           "label": "WebSocket protocol"
