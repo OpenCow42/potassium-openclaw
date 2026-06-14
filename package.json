@@ -1,6 +1,6 @@
 {
   "name": "@opencow/potassium-openclaw",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "type": "module",
   "description": "OpenClaw Infomaniak tools and skills backed by the liquid-potassium Node SDK.",
   "license": "Apache-2.0",

@@ -24,9 +24,9 @@ replies, typing indicators, and optional online presence.
 ## Status
 
 This repository is the OpenClaw adapter and package layer for Infomaniak. The
-package metadata is ready for public npm publication, but the package is not
-published to npm or ClawHub yet. Install from a local checkout while developing,
-or from a pinned GitHub commit for regular use.
+current GitHub release is `0.3.0`. Package metadata is ready for public npm or
+ClawHub publication; until it is published there, install from a local checkout
+while developing or from a pinned GitHub release for regular use.
 
 ## Requirements
 
@@ -44,10 +44,10 @@ openclaw plugins install --link .
 openclaw plugins enable potassium
 ```
 
-From GitHub, pin a reviewed commit:
+From GitHub, pin a reviewed release or commit:
 
 ```sh
-openclaw plugins install git:github.com/OpenCow42/potassium-openclaw@<commit-sha>
+openclaw plugins install git:github.com/OpenCow42/potassium-openclaw@0.3.0
 openclaw plugins enable potassium
 ```
 

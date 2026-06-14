@@ -35,10 +35,14 @@ const allowedKchatExampleHosts = new Set(["example-team", "websocket"]);
 
 test("package declares a native OpenClaw plugin backed by the published liquid-potassium package", async () => {
   const packageJson = JSON.parse(await readFile(join(repositoryRoot, "package.json"), "utf8"));
+  const packageLock = JSON.parse(await readFile(join(repositoryRoot, "package-lock.json"), "utf8"));
   const nativeManifest = JSON.parse(await readFile(join(repositoryRoot, "openclaw.plugin.json"), "utf8"));
   const codexManifest = JSON.parse(await readFile(join(repositoryRoot, ".codex-plugin", "plugin.json"), "utf8"));
 
   assert.equal(packageJson.private, undefined, "public bundle must not be marked private");
+  assert.equal(packageJson.version, "0.3.0");
+  assert.equal(packageLock.version, packageJson.version);
+  assert.equal(packageLock.packages?.[""]?.version, packageJson.version);
   assert.equal(packageJson.license, "Apache-2.0");
   assert.equal(packageJson.homepage, "https://github.com/OpenCow42/potassium-openclaw#readme");
   assert.deepEqual(packageJson.repository, {
@@ -99,6 +103,7 @@ test("package declares a native OpenClaw plugin backed by the published liquid-p
   assert.equal(nativeManifest.channelConfigs?.kchat?.schema?.properties?.websocketDispatchQueueSize?.default, 100);
 
   assert.equal(codexManifest.name, "potassium");
+  assert.equal(codexManifest.version, packageJson.version);
   assert.equal(codexManifest.license, "Apache-2.0");
   assert.equal(codexManifest.repository, "https://github.com/OpenCow42/potassium-openclaw");
   assert.equal(codexManifest.author?.name, "OpenCow");
