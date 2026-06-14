@@ -5,6 +5,7 @@ import { Readable } from "node:stream";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { buildChannelInboundEventContext } from "openclaw/plugin-sdk/channel-inbound";
+import { createTypingCallbacks } from "openclaw/plugin-sdk/channel-reply-pipeline";
 
 const repositoryRoot = fileURLToPath(new URL("../", import.meta.url));
 const expectedToolNames = [
@@ -66,6 +67,8 @@ test("package declares a native OpenClaw plugin backed by the published liquid-p
   assert.equal(nativeManifest.channelConfigs?.kchat?.schema?.properties?.apiBaseUrl?.type, "string");
   assert.equal(nativeManifest.channelConfigs?.kchat?.schema?.properties?.defaultChannel?.type, "string");
   assert.equal(nativeManifest.channelConfigs?.kchat?.schema?.properties?.setOnline?.type, "boolean");
+  assert.equal(nativeManifest.channelConfigs?.kchat?.schema?.properties?.typingIndicator?.default, true);
+  assert.equal(nativeManifest.channelConfigs?.kchat?.schema?.properties?.setOnlineOnReplyStart?.type, "boolean");
   assert.equal(nativeManifest.channelConfigs?.kchat?.schema?.properties?.receiveMode?.default, "webhook");
   assert.equal(nativeManifest.channelConfigs?.kchat?.schema?.properties?.websocketProtocol?.default, "infomaniak-echo");
   assert.equal(nativeManifest.channelConfigs?.kchat?.schema?.properties?.webhookPath?.default, "/channels/kchat/webhook");
@@ -430,6 +433,202 @@ test("kChat inbound root posts reply in a thread under the original post", async
     requiredCapabilities: { text: true, replyTo: true, thread: true },
   });
   assert.deepEqual(routeCalls[0].peer, { kind: "channel", id: "question-channel" });
+});
+
+test("kChat inbound replies publish typing and can set the user online", async () => {
+  const { dispatchKchatInboundWebhookEvent, normalizeKchatOutgoingWebhookPayload } = await import(
+    pathToFileURL(join(repositoryRoot, "index.js")).href
+  );
+  const inboundRuns = [];
+  const calls = [];
+  const client = {
+    kchat: {
+      async getuser(request) {
+        calls.push(["getuser", request]);
+        return { id: "bot-user-id" };
+      },
+      async updateuserstatus(request) {
+        calls.push(["updateuserstatus", request]);
+        return { user_id: "bot-user-id", status: "online" };
+      },
+      async publishusertyping(request) {
+        calls.push(["publishusertyping", request]);
+        return { status: "OK" };
+      },
+    },
+  };
+  const inbound = normalizeKchatOutgoingWebhookPayload({
+    channel_id: "question-channel",
+    post_id: "post-123",
+    root_id: "root-123",
+    user_id: "user-123",
+    user_name: "alice",
+    text: "threaded question",
+  });
+
+  await dispatchKchatInboundWebhookEvent({
+    cfg: { channels: { kchat: { setOnlineOnReplyStart: true } } },
+    channelConfig: { setOnlineOnReplyStart: true },
+    runtime: createKchatRuntimeStub({ inboundRuns, realContext: true }),
+    inbound,
+    client,
+  });
+
+  const turn = await inboundRuns[0].adapter.resolveTurn(inboundRuns[0].adapter.ingest());
+  assert.equal(typeof turn.replyPipeline?.typing?.start, "function");
+  await turn.replyPipeline.typing.start();
+  await turn.replyPipeline.typing.start();
+
+  assert.deepEqual(calls, [
+    [
+      "getuser",
+      {
+        path: {
+          user_id: "me",
+        },
+      },
+    ],
+    [
+      "updateuserstatus",
+      {
+        path: {
+          user_id: "bot-user-id",
+        },
+        body: {
+          user_id: "bot-user-id",
+          status: "online",
+        },
+      },
+    ],
+    [
+      "publishusertyping",
+      {
+        path: {
+          user_id: "bot-user-id",
+        },
+        body: {
+          channel_id: "question-channel",
+          parent_id: "root-123",
+        },
+      },
+    ],
+    [
+      "publishusertyping",
+      {
+        path: {
+          user_id: "bot-user-id",
+        },
+        body: {
+          channel_id: "question-channel",
+          parent_id: "root-123",
+        },
+      },
+    ],
+  ]);
+});
+
+test("kChat inbound typing can be disabled independently of online config", async () => {
+  const { dispatchKchatInboundWebhookEvent, normalizeKchatOutgoingWebhookPayload } = await import(
+    pathToFileURL(join(repositoryRoot, "index.js")).href
+  );
+  const inboundRuns = [];
+  const client = {
+    kchat: {
+      async getuser() {
+        throw new Error("typing disabled should not resolve users");
+      },
+      async updateuserstatus() {
+        throw new Error("typing disabled should not set status");
+      },
+      async publishusertyping() {
+        throw new Error("typing disabled should not publish typing");
+      },
+    },
+  };
+  const inbound = normalizeKchatOutgoingWebhookPayload({
+    channel_id: "quiet-channel",
+    post_id: "post-quiet",
+    user_id: "user-123",
+    user_name: "alice",
+    text: "quiet please",
+  });
+
+  await dispatchKchatInboundWebhookEvent({
+    cfg: { channels: { kchat: { typingIndicator: false, setOnlineOnReplyStart: true } } },
+    channelConfig: { typingIndicator: false, setOnlineOnReplyStart: true },
+    runtime: createKchatRuntimeStub({ inboundRuns, realContext: true }),
+    inbound,
+    client,
+  });
+
+  const turn = await inboundRuns[0].adapter.resolveTurn(inboundRuns[0].adapter.ingest());
+  assert.equal(turn.replyPipeline, undefined);
+});
+
+test("kChat typing and status errors do not block final reply delivery", async () => {
+  const { dispatchKchatInboundWebhookEvent, normalizeKchatOutgoingWebhookPayload } = await import(
+    pathToFileURL(join(repositoryRoot, "index.js")).href
+  );
+  const inboundRuns = [];
+  const calls = [];
+  const warnings = [];
+  const client = {
+    kchat: {
+      async getuser(request) {
+        calls.push(["getuser", request]);
+        return { id: "bot-user-id" };
+      },
+      async updateuserstatus(request) {
+        calls.push(["updateuserstatus", request]);
+        throw new Error("status rejected token=should-not-leak");
+      },
+      async publishusertyping(request) {
+        calls.push(["publishusertyping", request]);
+        throw new Error("typing rejected");
+      },
+      async createpost(request) {
+        calls.push(["createpost", request]);
+        return { id: "reply-post", channel_id: "reply-channel" };
+      },
+    },
+  };
+  const inbound = normalizeKchatOutgoingWebhookPayload({
+    channel_id: "reply-channel",
+    post_id: "root-post",
+    user_id: "user-123",
+    user_name: "alice",
+    text: "answer me",
+  });
+
+  await dispatchKchatInboundWebhookEvent({
+    cfg: { channels: { kchat: { setOnlineOnReplyStart: true } } },
+    channelConfig: { setOnlineOnReplyStart: true },
+    runtime: createKchatRuntimeStub({ inboundRuns, realContext: true }),
+    inbound,
+    client,
+    log: {
+      warn(message) {
+        warnings.push(message);
+      },
+    },
+  });
+
+  const turn = await inboundRuns[0].adapter.resolveTurn(inboundRuns[0].adapter.ingest());
+  const typingCallbacks = createTypingCallbacks({
+    ...turn.replyPipeline.typing,
+    keepaliveIntervalMs: 0,
+  });
+  await typingCallbacks.onReplyStart();
+  await flushAsyncCallbacks();
+  typingCallbacks.onCleanup?.();
+
+  const delivery = await turn.delivery.deliver({ text: "agent reply" });
+  assert.equal(delivery.visibleReplySent, true);
+  assert.deepEqual(delivery.messageIds, ["reply-post"]);
+  assert.equal(warnings.some((message) => message.includes("kChat typing status update failed")), true);
+  assert.equal(warnings.some((message) => message.includes("kChat typing indicator failed")), true);
+  assert.equal(warnings.some((message) => message.includes("should-not-leak")), false);
+  assert.equal(calls.some(([name]) => name === "createpost"), true);
 });
 
 test("kChat inbound channel_id overrides configured defaultChannel for replies", async () => {
@@ -1352,6 +1551,12 @@ async function invokeWebhookHandler(handler, { body, contentType }) {
   const handled = await handler(req, response);
   assert.equal(handled, true);
   return response;
+}
+
+async function flushAsyncCallbacks(iterations = 8) {
+  for (let index = 0; index < iterations; index += 1) {
+    await Promise.resolve();
+  }
 }
 
 function createKchatRuntimeStub({ inboundRuns, routeCalls = [], contextCalls = [], realContext = false }) {

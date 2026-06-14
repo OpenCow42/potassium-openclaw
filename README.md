@@ -58,6 +58,8 @@ Supported kChat channel config:
 - `apiBaseUrl`: optional team-specific kChat API base URL. When omitted, Potassium derives `https://<teamName>.kchat.infomaniak.com` from a DNS-safe `teamName`.
 - `defaultChannel`: default destination for outbound-initiated posts. Inbound kChat replies ignore this value and route from the inbound event.
 - `setOnline`: optional `set_online` value sent with outbound posts.
+- `typingIndicator`: whether inbound OpenClaw replies should publish native kChat typing indicators while the reply is being prepared. Defaults to `true`.
+- `setOnlineOnReplyStart`: whether inbound OpenClaw replies should manually set the authenticated kChat user online before typing. When omitted, this is enabled only when `setOnline` is `true`.
 - `receiveMode`: inbound receive mode, one of `webhook`, `websocket`, `both`, or `disabled`. Defaults to `webhook`.
 - `websocketProtocol`: `infomaniak-echo` for hosted kChat, or `mattermost` for a plain Mattermost `/api/v4/websocket` server. Defaults to `infomaniak-echo`.
 - `webhookPath`: gateway path for inbound outgoing webhooks, default `/channels/kchat/webhook`.
@@ -83,9 +85,12 @@ Inbound setup is intentionally environment-only for secrets. For webhook mode, c
 
 For WebSocket mode against hosted Infomaniak kChat, set `receiveMode: "websocket"` or `"both"` and keep `INFOMANIAK_TOKEN` available to the OpenClaw process. The adapter connects to Infomaniak's Echo/Pusher-compatible socket, resolves the team/user IDs from `teamName`, authenticates `private-team.<team_id>` and `presence-teamUser.<user_id>` through `/broadcasting/auth`, and receives `posted` events without requiring a public callback URL. Set `websocketChannelScope: "all"` to accept every visible channel, or `websocketChannelScope: "selected"` with `websocketChannelIds` to limit which kChat channels can trigger OpenClaw. For compatibility, omitting `websocketChannelScope` still accepts all visible channels when `websocketChannelIds` is empty. For a plain Mattermost server, set `websocketProtocol: "mattermost"` and optionally `websocketUrl`.
 
+Inbound replies publish a native kChat typing indicator by default. For threaded replies, Potassium sends the typing event with the inbound thread root so kChat shows the indicator in the right conversation. If `setOnlineOnReplyStart` is `true`, Potassium also calls the kChat status endpoint once at reply start with `status: "online"`. This presence update is different from outbound post `setOnline`; it is a manual status change and may persist until kChat auto-updates it or another status change occurs.
+
 WebSocket troubleshooting notes:
 
 - A healthy socket only means Potassium is receiving live frames. OpenClaw dispatch can still drop a frame because the channel is not selected, the sender is ignored, the post id is already inside the dedupe window, or the payload is not a usable `posted` event.
+- Typing/status failures are logged as warnings and do not block the final reply. A healthy WebSocket does not guarantee typing or status calls were accepted by the kChat REST API.
 - Drop diagnostics log reason and identifiers such as post, channel, team, and user ids. They intentionally do not log message text or tokens.
 - WebSocket intake is live only. Messages sent while OpenClaw is offline are not guaranteed to be backfilled unless another workflow polls known channels.
 
@@ -100,6 +105,8 @@ Example non-secret kChat config:
       apiBaseUrl: "https://example-team.kchat.infomaniak.com",
       defaultChannel: "id:<channel-id>",
       setOnline: false,
+      typingIndicator: true,
+      setOnlineOnReplyStart: true,
       receiveMode: "websocket",
       websocketProtocol: "infomaniak-echo",
       webhookPath: "/channels/kchat/webhook",
@@ -187,6 +194,8 @@ openclaw config patch --stdin <<'JSON5'
               teamName: "example-team",
               apiBaseUrl: "https://example-team.kchat.infomaniak.com",
               defaultChannel: "id:<channel-id>",
+              typingIndicator: true,
+              setOnlineOnReplyStart: true,
               receiveMode: "websocket",
               websocketProtocol: "infomaniak-echo",
               outgoingWebhookTokenEnvName: "INFOMANIAK_KCHAT_OUTGOING_WEBHOOK_TOKEN",

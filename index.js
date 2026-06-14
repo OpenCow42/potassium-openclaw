@@ -65,6 +65,16 @@ export const PotassiumKchatChannelConfigJsonSchema = {
       type: "boolean",
       description: "Whether kChat should set the authenticated user online when creating posts.",
     },
+    typingIndicator: {
+      type: "boolean",
+      default: true,
+      description: "Whether inbound kChat replies should publish a native typing indicator while OpenClaw is preparing a reply.",
+    },
+    setOnlineOnReplyStart: {
+      type: "boolean",
+      description:
+        "Whether inbound kChat replies should manually set the authenticated user online before publishing typing. Defaults to true when setOnline is true.",
+    },
     receiveMode: {
       type: "string",
       enum: ["webhook", "websocket", "both", "disabled"],
@@ -233,6 +243,8 @@ export const potassiumKchatChannelPlugin = {
         const apiBaseUrl = readOptionalString(inputRecord.apiBaseUrl);
         const defaultChannel = readOptionalString(inputRecord.defaultChannel);
         const setOnline = readOptionalBoolean(inputRecord.setOnline);
+        const typingIndicator = readOptionalBoolean(inputRecord.typingIndicator);
+        const setOnlineOnReplyStart = readOptionalBoolean(inputRecord.setOnlineOnReplyStart);
         const receiveMode = readOptionalString(inputRecord.receiveMode);
         const websocketProtocol = readOptionalString(inputRecord.websocketProtocol);
         const webhookPath = readOptionalString(inputRecord.webhookPath);
@@ -263,6 +275,8 @@ export const potassiumKchatChannelPlugin = {
               ...(apiBaseUrl ? { apiBaseUrl } : {}),
               ...(defaultChannel ? { defaultChannel } : {}),
               ...(setOnline === undefined ? {} : { setOnline }),
+              ...(typingIndicator === undefined ? {} : { typingIndicator }),
+              ...(setOnlineOnReplyStart === undefined ? {} : { setOnlineOnReplyStart }),
               ...(isKnownKchatReceiveMode(receiveMode) ? { receiveMode } : {}),
               ...(isKnownKchatWebSocketProtocol(websocketProtocol) ? { websocketProtocol } : {}),
               ...(webhookPath ? { webhookPath } : {}),
@@ -383,6 +397,7 @@ export async function sendKchatText(ctx, options = {}) {
     createClient: options.createClient,
     fetch: options.fetch,
     signal: ctx.signal,
+    token: options.token,
   });
   const channelConfig = resolveKchatChannelConfig(ctx.cfg);
   const client = destination.client ?? resolveKchatClient({
@@ -390,6 +405,7 @@ export async function sendKchatText(ctx, options = {}) {
     client: options.client,
     createClient: options.createClient,
     fetch: options.fetch,
+    token: options.token,
   });
   const rootId = resolveKchatRootId(ctx);
   const body = {
@@ -429,6 +445,101 @@ export async function sendKchatText(ctx, options = {}) {
     receipt,
     ...(messageId ? { messageId } : {}),
     providerResult,
+  };
+}
+
+export async function sendKchatTypingIndicator(ctx, options = {}) {
+  const channelConfig = options.channelConfig ?? resolveKchatChannelConfig(ctx.cfg);
+  const client = resolveKchatClient({
+    channelConfig,
+    client: options.client,
+    createClient: options.createClient,
+    fetch: options.fetch,
+    token: options.token,
+  });
+  const operations = resolveKchatOperations(client);
+  const userId = readOptionalString(options.userId) ?? (await resolveKchatCurrentUserId(operations, { signal: ctx.signal }));
+  const setOnlineOnReplyStart =
+    readOptionalBoolean(channelConfig.setOnlineOnReplyStart) ?? (readOptionalBoolean(channelConfig.setOnline) === true);
+
+  if (setOnlineOnReplyStart && !options.onlineStatusSent?.value) {
+    if (options.onlineStatusSent) {
+      options.onlineStatusSent.value = true;
+    }
+    try {
+      await operations.updateuserstatus({
+        path: { user_id: userId },
+        body: {
+          user_id: userId,
+          status: "online",
+        },
+        ...(ctx.signal ? { signal: ctx.signal } : {}),
+      });
+    } catch (error) {
+      logKchatTypingStatusFailure(options.log, error);
+    }
+  }
+
+  await operations.publishusertyping({
+    path: { user_id: userId },
+    body: {
+      channel_id: ctx.channelId,
+      ...(ctx.parentId ? { parent_id: ctx.parentId } : {}),
+    },
+    ...(ctx.signal ? { signal: ctx.signal } : {}),
+  });
+}
+
+function createKchatInboundReplyPipeline({ cfg, channelConfig, replyRoute, client, createClient, fetch, token, log }) {
+  if (!resolveKchatTypingIndicatorEnabled(channelConfig)) {
+    return undefined;
+  }
+
+  const onlineStatusSent = { value: false };
+  let currentUserIdPromise;
+  const resolveCurrentUserId = async () => {
+    currentUserIdPromise ??= (async () => {
+      const resolvedClient = resolveKchatClient({
+        channelConfig,
+        client,
+        createClient,
+        fetch,
+        token,
+      });
+      return await resolveKchatCurrentUserId(resolveKchatOperations(resolvedClient));
+    })();
+    try {
+      return await currentUserIdPromise;
+    } catch (error) {
+      currentUserIdPromise = undefined;
+      throw error;
+    }
+  };
+
+  return {
+    typing: {
+      start: async () =>
+        await sendKchatTypingIndicator(
+          {
+            cfg,
+            channelId: replyRoute.nativeChannelId,
+            parentId: replyRoute.threadRootId,
+          },
+          {
+            channelConfig,
+            client,
+            createClient,
+            fetch,
+            token,
+            userId: await resolveCurrentUserId(),
+            onlineStatusSent,
+            log,
+          },
+        ),
+      onStartError: (error) => {
+        logKchatTypingIndicatorFailure(log, error);
+      },
+    },
   };
 }
 
@@ -484,6 +595,11 @@ export function createPotassiumKchatWebhookHandler(options = {}) {
         channelConfig,
         runtime: options.runtime,
         inbound,
+        client: options.client,
+        createClient: options.createClient,
+        fetch: options.fetch,
+        token: options.token,
+        log: options.log,
       });
     } catch (error) {
       if (isKchatInboundReplyRoutingError(error)) {
@@ -570,7 +686,7 @@ export function normalizeKchatOutgoingWebhookPayload(payload) {
   };
 }
 
-export async function dispatchKchatInboundWebhookEvent({ cfg, channelConfig, runtime, inbound }) {
+export async function dispatchKchatInboundWebhookEvent({ cfg, channelConfig, runtime, inbound, client, createClient, fetch, token, log }) {
   const channelRuntime = runtime?.channel;
   if (!channelRuntime?.inbound?.run) {
     throw new Error("OpenClaw channel inbound runtime is unavailable.");
@@ -610,6 +726,16 @@ export async function dispatchKchatInboundWebhookEvent({ cfg, channelConfig, run
         const threadSession = resolveKchatInboundThreadSession({
           baseSessionKey: route.sessionKey,
           threadRootId: replyRoute.threadRootId,
+        });
+        const replyPipeline = createKchatInboundReplyPipeline({
+          cfg,
+          channelConfig,
+          replyRoute,
+          client,
+          createClient,
+          fetch,
+          token,
+          log,
         });
         const ctxPayload = channelRuntime.inbound.buildContext({
           channel: KCHAT_CHANNEL_ID,
@@ -658,6 +784,7 @@ export async function dispatchKchatInboundWebhookEvent({ cfg, channelConfig, run
           ctxPayload,
           recordInboundSession: channelRuntime.session.recordInboundSession,
           dispatchReplyWithBufferedBlockDispatcher: channelRuntime.reply.dispatchReplyWithBufferedBlockDispatcher,
+          ...(replyPipeline ? { replyPipeline } : {}),
           delivery: {
             durable: () => ({
               to: replyRoute.to,
@@ -675,6 +802,11 @@ export async function dispatchKchatInboundWebhookEvent({ cfg, channelConfig, run
                 to: replyRoute.to,
                 text,
                 ...(replyRoute.threadRootId ? { threadId: replyRoute.threadRootId, replyToId: replyRoute.replyToId } : {}),
+              }, {
+                client,
+                createClient,
+                fetch,
+                token,
               });
               return {
                 visibleReplySent: true,
@@ -791,6 +923,11 @@ export async function runKchatWebSocketConnection(options = {}) {
         runtime: options.runtime,
         event,
         dedupeState,
+        client: options.client,
+        createClient: options.createClient,
+        fetch: options.fetch,
+        token,
+        log: options.log,
       })
         .then((result) => {
           logKchatWebSocketDispatchResult(result, options.log);
@@ -822,7 +959,7 @@ export function resolveKchatWebSocketUrl(channelConfig) {
   });
 }
 
-export async function dispatchKchatWebSocketEvent({ cfg, channelConfig, runtime, frame, dedupeState }) {
+export async function dispatchKchatWebSocketEvent({ cfg, channelConfig, runtime, frame, dedupeState, client, createClient, fetch, token, log }) {
   const payload = normalizeKchatWebSocketPostEvent(frame, channelConfig);
   if (!payload) {
     return { dispatched: false, reason: "unsupported_event" };
@@ -854,11 +991,16 @@ export async function dispatchKchatWebSocketEvent({ cfg, channelConfig, runtime,
     channelConfig,
     runtime,
     inbound,
+    client,
+    createClient,
+    fetch,
+    token,
+    log,
   });
   return createKchatWebSocketDispatchSuccess(inbound);
 }
 
-export async function dispatchKchatWebSocketPostEvent({ cfg, channelConfig, runtime, event, dedupeState }) {
+export async function dispatchKchatWebSocketPostEvent({ cfg, channelConfig, runtime, event, dedupeState, client, createClient, fetch, token, log }) {
   const payload = normalizeKchatWebSocketPostEventPayload(event, channelConfig);
   if (!payload) {
     return { dispatched: false, reason: "unsupported_event" };
@@ -890,6 +1032,11 @@ export async function dispatchKchatWebSocketPostEvent({ cfg, channelConfig, runt
     channelConfig,
     runtime,
     inbound,
+    client,
+    createClient,
+    fetch,
+    token,
+    log,
   });
   return createKchatWebSocketDispatchSuccess(inbound);
 }
@@ -983,6 +1130,27 @@ function logKchatWebSocketDispatchResult(result, log) {
     .map(([key, value]) => (readOptionalString(value) ? `${key}=${value}` : undefined))
     .filter(Boolean);
   log?.debug?.(`kChat WebSocket event dropped: reason=${reason}${fields.length > 0 ? ` ${fields.join(" ")}` : ""}`);
+}
+
+function logKchatTypingStatusFailure(log, error) {
+  log?.warn?.(`kChat typing status update failed: ${formatKchatSafeError(error)}`);
+}
+
+function logKchatTypingIndicatorFailure(log, error) {
+  log?.warn?.(`kChat typing indicator failed: ${formatKchatSafeError(error)}`);
+}
+
+function formatKchatSafeError(error) {
+  const message = error instanceof Error ? error.message : String(error);
+  return redactKchatSensitiveText(message);
+}
+
+function redactKchatSensitiveText(value) {
+  return String(value)
+    .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [redacted]")
+    .replace(/([?&](?:access_)?token=)[^&\s]+/gi, "$1[redacted]")
+    .replace(/(\b(?:access_)?token=)[^&\s]+/gi, "$1[redacted]")
+    .replace(/(authorization["':=\s]+)[^,\s}]+/gi, "$1[redacted]");
 }
 
 function withoutDirectTokenConfig(schema) {
@@ -1123,7 +1291,7 @@ function resolveKchatDestinationTarget({ cfg, to }) {
   return target;
 }
 
-async function resolveKchatDestination({ cfg, to, client, createClient, fetch, signal }) {
+async function resolveKchatDestination({ cfg, to, client, createClient, fetch, signal, token }) {
   const channelConfig = resolveKchatChannelConfig(cfg);
   const rawDestination = resolveKchatDestinationTarget({ cfg, to });
   const idDestination = parseKchatChannelIdDestination(rawDestination);
@@ -1143,6 +1311,7 @@ async function resolveKchatDestination({ cfg, to, client, createClient, fetch, s
     client,
     createClient,
     fetch,
+    token,
   });
   const channel = await resolveKchatOperations(resolvedClient).getchannelbynameforteamname({
     path: {
@@ -1215,12 +1384,12 @@ function normalizeKchatChannelName(value) {
   return readOptionalString(normalized.startsWith("#") ? normalized.slice(1) : normalized);
 }
 
-function resolveKchatClient({ channelConfig, client, createClient, fetch }) {
+function resolveKchatClient({ channelConfig, client, createClient, fetch, token: tokenOverride }) {
   if (client) {
     return client;
   }
 
-  const token = readKchatBearerTokenFromEnv(channelConfig, globalThis.process?.env);
+  const token = readOptionalString(tokenOverride) ?? readKchatBearerTokenFromEnv(channelConfig, globalThis.process?.env);
   if (!token) {
     throw new Error(`Set ${resolveKchatTokenEnvName(channelConfig)} in the environment before sending kChat messages.`);
   }
@@ -1283,9 +1452,37 @@ function resolveKchatSetOnlineQuery(channelConfig) {
   return setOnline === undefined ? undefined : { set_online: setOnline };
 }
 
+function resolveKchatTypingIndicatorEnabled(channelConfig) {
+  return readOptionalBoolean(channelConfig.typingIndicator) ?? true;
+}
+
+async function resolveKchatCurrentUserId(operations, options = {}) {
+  if (typeof operations.getuser !== "function") {
+    throw new Error("Infomaniak kChat getuser operation is unavailable.");
+  }
+
+  const currentUser = await operations.getuser({
+    path: {
+      user_id: "me",
+    },
+    ...(options.signal ? { signal: options.signal } : {}),
+  });
+  const userId = resolveProviderUserId(currentUser);
+  if (!userId) {
+    throw new Error("Infomaniak kChat current user response did not include an id.");
+  }
+
+  return userId;
+}
+
 function resolveProviderChannelId(value) {
   const record = unwrapProviderRecord(value);
   return readOptionalString(record?.id) ?? readOptionalString(record?.channel_id);
+}
+
+function resolveProviderUserId(value) {
+  const record = unwrapProviderRecord(value);
+  return readOptionalString(record?.id) ?? readOptionalString(record?.user_id);
 }
 
 function resolveProviderPostId(value) {

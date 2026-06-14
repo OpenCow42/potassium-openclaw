@@ -122,6 +122,15 @@
             "type": "boolean",
             "description": "Whether kChat should set the authenticated user online when creating posts."
           },
+          "typingIndicator": {
+            "type": "boolean",
+            "default": true,
+            "description": "Whether inbound kChat replies should publish a native typing indicator while OpenClaw is preparing a reply."
+          },
+          "setOnlineOnReplyStart": {
+            "type": "boolean",
+            "description": "Whether inbound kChat replies should manually set the authenticated user online before publishing typing. Defaults to true when setOnline is true."
+          },
           "receiveMode": {
             "type": "string",
             "enum": [
@@ -241,6 +250,12 @@
         "defaultChannel": {
           "label": "Default channel",
           "placeholder": "#general"
+        },
+        "typingIndicator": {
+          "label": "Typing indicator"
+        },
+        "setOnlineOnReplyStart": {
+          "label": "Set online on reply start"
         },
         "receiveMode": {
           "label": "Inbound receive mode"
