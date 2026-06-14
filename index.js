@@ -1,6 +1,7 @@
 import { buildJsonPluginConfigSchema, definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
 import { createChannelPluginBase } from "openclaw/plugin-sdk/channel-core";
 import { createMessageReceiptFromOutboundResults, defineChannelMessageAdapter } from "openclaw/plugin-sdk/channel-outbound";
+import { loadOutboundMediaFromUrl } from "openclaw/plugin-sdk/outbound-media";
 import { resolveThreadSessionKeys } from "openclaw/plugin-sdk/routing";
 import { isRequestBodyLimitError, readRequestBodyWithLimit, requestBodyErrorToText } from "openclaw/plugin-sdk/webhook-ingress";
 import {
@@ -12,6 +13,7 @@ import {
 } from "liquid-potassium";
 import { createInfomaniakOpenClawTools, InfomaniakPluginConfigJsonSchema, resolveInfomaniakPluginConfig } from "liquid-potassium/openclaw/tools";
 import { timingSafeEqual } from "node:crypto";
+import { basename } from "node:path";
 
 const DEFAULT_INFOMANIAK_TOKEN_ENV_NAME = "INFOMANIAK_TOKEN";
 const DEFAULT_KCHAT_OUTGOING_WEBHOOK_TOKEN_ENV_NAME = "INFOMANIAK_KCHAT_OUTGOING_WEBHOOK_TOKEN";
@@ -423,6 +425,7 @@ export const potassiumKchatChannelPlugin = {
     deliveryMode: "direct",
     deliveryCapabilities: {
       durableFinal: {
+        media: true,
         text: true,
         replyTo: true,
         thread: true,
@@ -438,6 +441,9 @@ export const potassiumKchatChannelPlugin = {
     },
     sendText(ctx) {
       return sendKchatText(ctx).then(({ deliveryResult }) => deliveryResult);
+    },
+    sendMedia(ctx) {
+      return sendKchatMedia(ctx).then(({ deliveryResult }) => deliveryResult);
     },
   },
   gateway: {
@@ -490,6 +496,7 @@ export function createPotassiumKchatMessageAdapter(options = {}) {
     id: KCHAT_CHANNEL_ID,
     durableFinal: {
       capabilities: {
+        media: true,
         text: true,
         replyTo: true,
         thread: true,
@@ -498,6 +505,14 @@ export function createPotassiumKchatMessageAdapter(options = {}) {
     send: {
       text: async (ctx) => {
         const { receipt, messageId, providerResult } = await sendKchatText(ctx, options);
+        return {
+          receipt,
+          ...(messageId ? { messageId } : {}),
+          providerResult,
+        };
+      },
+      media: async (ctx) => {
+        const { receipt, messageId, providerResult } = await sendKchatMedia(ctx, options);
         return {
           receipt,
           ...(messageId ? { messageId } : {}),
@@ -564,6 +579,79 @@ export async function sendKchatText(ctx, options = {}) {
     receipt,
     ...(messageId ? { messageId } : {}),
     providerResult,
+  };
+}
+
+export async function sendKchatMedia(ctx, options = {}) {
+  const destination = await resolveKchatDestination({
+    cfg: ctx.cfg,
+    to: ctx.to,
+    client: options.client,
+    createClient: options.createClient,
+    fetch: options.fetch,
+    signal: ctx.signal,
+    token: options.token,
+  });
+  const channelConfig = resolveKchatChannelConfig(ctx.cfg);
+  const client = destination.client ?? resolveKchatClient({
+    channelConfig,
+    client: options.client,
+    createClient: options.createClient,
+    fetch: options.fetch,
+    token: options.token,
+  });
+  const operations = resolveKchatOperations(client);
+  const media = await loadKchatOutboundMedia(ctx, options);
+  const { fileIds, uploadResult } = await uploadKchatMediaFile({
+    operations,
+    channelId: destination.channelId,
+    media,
+    mediaUrl: ctx.mediaUrl,
+    signal: ctx.signal,
+  });
+  const rootId = resolveKchatRootId(ctx);
+  const body = {
+    channel_id: destination.channelId,
+    message: String(ctx.text ?? ""),
+    file_ids: fileIds,
+    ...(rootId ? { root_id: rootId } : {}),
+  };
+  const query = resolveKchatSetOnlineQuery(channelConfig);
+  const providerResult = await operations.createpost({
+    body,
+    ...(query ? { query } : {}),
+    ...(ctx.signal ? { signal: ctx.signal } : {}),
+  });
+  const messageId = resolveProviderPostId(providerResult);
+  const deliveryResult = {
+    channel: KCHAT_CHANNEL_ID,
+    messageId: messageId ?? "",
+    channelId: destination.channelId,
+    conversationId: destination.conversationId,
+    timestamp: resolveProviderTimestamp(providerResult),
+    meta: {
+      rawProviderResult: providerResult,
+      rawUploadResult: uploadResult,
+      kchatFileIds: fileIds,
+    },
+  };
+  const receipt = createMessageReceiptFromOutboundResults({
+    results: [deliveryResult],
+    kind: "media",
+    threadId: ctx.threadId == null ? undefined : String(ctx.threadId),
+    replyToId: ctx.replyToId ?? undefined,
+  });
+
+  return {
+    deliveryResult: {
+      ...deliveryResult,
+      receipt,
+    },
+    receipt,
+    ...(messageId ? { messageId } : {}),
+    providerResult,
+    uploadResult,
+    fileIds,
   };
 }
 
@@ -1824,6 +1912,112 @@ function resolveKchatRootId(ctx) {
 function resolveKchatSetOnlineQuery(channelConfig) {
   const setOnline = readOptionalBoolean(channelConfig.setOnline);
   return setOnline === undefined ? undefined : { set_online: setOnline };
+}
+
+async function loadKchatOutboundMedia(ctx, options) {
+  return await loadOutboundMediaFromUrl(ctx.mediaUrl, {
+    mediaAccess: ctx.mediaAccess,
+    mediaLocalRoots: ctx.mediaLocalRoots,
+    mediaReadFile: ctx.mediaReadFile,
+    fetchImpl: options.fetch,
+    ...(options.mediaMaxBytes === undefined ? {} : { maxBytes: options.mediaMaxBytes }),
+  });
+}
+
+async function uploadKchatMediaFile({ operations, channelId, media, mediaUrl, signal }) {
+  if (typeof operations.uploadfile !== "function") {
+    throw new Error("Infomaniak kChat uploadfile operation is unavailable.");
+  }
+
+  const fileName = resolveKchatMediaFileName(media, mediaUrl);
+  const fileOptions = media.contentType ? { type: media.contentType } : {};
+  const formData = new FormData();
+  formData.set("channel_id", channelId);
+  formData.append("files", new File([media.buffer], fileName, fileOptions), fileName);
+
+  const uploadResult = await operations.uploadfile({
+    body: formData,
+    ...(signal ? { signal } : {}),
+  });
+  const fileIds = resolveKchatUploadFileIds(uploadResult);
+  if (fileIds.length === 0) {
+    throw new Error("Infomaniak kChat uploadfile response did not include a file id.");
+  }
+
+  return { fileIds, uploadResult };
+}
+
+function resolveKchatUploadFileIds(uploadResult) {
+  const result = isRecord(uploadResult) ? uploadResult : {};
+  const directFileIds =
+    readOptionalStringArray(result.file_ids) ??
+    readOptionalStringArray(result.fileIds) ??
+    [
+      readOptionalString(result.file_id),
+      readOptionalString(result.fileId),
+      readOptionalString(result.id),
+    ].filter(Boolean);
+  if (directFileIds.length > 0) {
+    return directFileIds;
+  }
+
+  const fileInfos = Array.isArray(result.file_infos)
+    ? result.file_infos
+    : Array.isArray(result.fileInfos)
+      ? result.fileInfos
+      : Array.isArray(result.files)
+        ? result.files
+        : [];
+
+  return fileInfos
+    .map((entry) => {
+      if (!isRecord(entry)) {
+        return readOptionalString(entry);
+      }
+
+      return readOptionalString(entry.id) ?? readOptionalString(entry.file_id) ?? readOptionalString(entry.fileId);
+    })
+    .filter(Boolean);
+}
+
+function resolveKchatMediaFileName(media, mediaUrl) {
+  return readOptionalString(media.fileName) ?? resolveKchatMediaFileNameFromUrl(mediaUrl) ?? `openclaw-media${resolveKchatMediaFileExtension(media)}`;
+}
+
+function resolveKchatMediaFileNameFromUrl(mediaUrl) {
+  const rawUrl = readOptionalString(mediaUrl);
+  if (!rawUrl) {
+    return undefined;
+  }
+
+  try {
+    const url = new URL(rawUrl);
+    if (url.protocol === "data:") {
+      return undefined;
+    }
+
+    return readOptionalString(basename(decodeURIComponent(url.pathname)));
+  } catch {
+    return readOptionalString(basename(rawUrl.split(/[?#]/, 1)[0] ?? ""));
+  }
+}
+
+function resolveKchatMediaFileExtension(media) {
+  const contentType = readOptionalString(media.contentType)?.split(";", 1)[0]?.toLowerCase();
+  if (!contentType) {
+    return "";
+  }
+
+  const extensionByContentType = {
+    "image/gif": ".gif",
+    "image/jpeg": ".jpg",
+    "image/png": ".png",
+    "image/webp": ".webp",
+    "audio/mpeg": ".mp3",
+    "application/pdf": ".pdf",
+    "text/plain": ".txt",
+  };
+  return extensionByContentType[contentType] ?? "";
 }
 
 function resolveKchatTypingIndicatorEnabled(channelConfig) {
