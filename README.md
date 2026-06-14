@@ -71,13 +71,21 @@ Supported kChat channel config:
 - `websocketSubscriptions`: optional explicit Echo subscription channel names.
 - `websocketTeamId`: optional kChat team ID override for Echo subscriptions.
 - `websocketTeamUserId`: optional kChat team user ID override for Echo subscriptions.
-- `websocketChannelIds`: optional list of kChat channel IDs accepted from the WebSocket stream.
+- `websocketChannelScope`: WebSocket intake scope, either `all` or `selected`. When omitted, Potassium preserves the legacy shorthand: configured `websocketChannelIds` means `selected`, and no channel IDs means `all`.
+- `websocketChannelIds`: optional list of kChat channel IDs accepted from the WebSocket stream when the scope is `selected`.
+- `websocketDedupeWindowMs`: milliseconds to suppress duplicate WebSocket posts by post id. Defaults to `120000`; set `0` to disable duplicate suppression.
 
 Outbound destinations support `id:<channel_id>`, `#channel`, `channel`, and `team/channel`. Thread replies use the root post or reply id as the kChat thread root id.
 
 Inbound setup is intentionally environment-only for secrets. For webhook mode, create a kChat outgoing webhook in Infomaniak/kChat that points at the OpenClaw gateway URL plus `webhookPath`, set the webhook verification token in `INFOMANIAK_KCHAT_OUTGOING_WEBHOOK_TOKEN` or the configured env var, and add the posting account to `ignoredUserIds` or `ignoredUserNames` to avoid reply loops. kChat/Mattermost outgoing webhook payloads may arrive as JSON, form-urlencoded fields, or a form `payload` JSON value.
 
-For WebSocket mode against hosted Infomaniak kChat, set `receiveMode: "websocket"` or `"both"` and keep `INFOMANIAK_TOKEN` available to the OpenClaw process. The adapter connects to Infomaniak's Echo/Pusher-compatible socket, resolves the team/user IDs from `teamName`, authenticates `private-team.<team_id>` and `presence-teamUser.<user_id>` through `/broadcasting/auth`, and receives `posted` events without requiring a public callback URL. Use `websocketChannelIds` when you want to limit which visible kChat channels can trigger OpenClaw. For a plain Mattermost server, set `websocketProtocol: "mattermost"` and optionally `websocketUrl`.
+For WebSocket mode against hosted Infomaniak kChat, set `receiveMode: "websocket"` or `"both"` and keep `INFOMANIAK_TOKEN` available to the OpenClaw process. The adapter connects to Infomaniak's Echo/Pusher-compatible socket, resolves the team/user IDs from `teamName`, authenticates `private-team.<team_id>` and `presence-teamUser.<user_id>` through `/broadcasting/auth`, and receives `posted` events without requiring a public callback URL. Set `websocketChannelScope: "all"` to accept every visible channel, or `websocketChannelScope: "selected"` with `websocketChannelIds` to limit which kChat channels can trigger OpenClaw. For compatibility, omitting `websocketChannelScope` still accepts all visible channels when `websocketChannelIds` is empty. For a plain Mattermost server, set `websocketProtocol: "mattermost"` and optionally `websocketUrl`.
+
+WebSocket troubleshooting notes:
+
+- A healthy socket only means Potassium is receiving live frames. OpenClaw dispatch can still drop a frame because the channel is not selected, the sender is ignored, the post id is already inside the dedupe window, or the payload is not a usable `posted` event.
+- Drop diagnostics log reason and identifiers such as post, channel, team, and user ids. They intentionally do not log message text or tokens.
+- WebSocket intake is live only. Messages sent while OpenClaw is offline are not guaranteed to be backfilled unless another workflow polls known channels.
 
 Example non-secret kChat config:
 
@@ -96,7 +104,9 @@ Example non-secret kChat config:
       outgoingWebhookTokenEnvName: "INFOMANIAK_KCHAT_OUTGOING_WEBHOOK_TOKEN",
       ignoredUserIds: ["<posting-user-id>"],
       ignoredUserNames: ["<posting-user-name>"],
-      websocketChannelIds: ["<channel-id>"]
+      websocketChannelScope: "selected",
+      websocketChannelIds: ["<channel-id>"],
+      websocketDedupeWindowMs: 120000
     }
   }
 }
@@ -180,7 +190,9 @@ openclaw config patch --stdin <<'JSON5'
               outgoingWebhookTokenEnvName: "INFOMANIAK_KCHAT_OUTGOING_WEBHOOK_TOKEN",
               ignoredUserIds: ["<posting-user-id>"],
               ignoredUserNames: ["<posting-user-name>"],
-              websocketChannelIds: ["<channel-id>"]
+              websocketChannelScope: "selected",
+              websocketChannelIds: ["<channel-id>"],
+              websocketDedupeWindowMs: 120000
             }
           }
         }

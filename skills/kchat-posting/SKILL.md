@@ -34,7 +34,9 @@ Useful `channels.kchat` config:
 - `setOnline`: optional outbound `set_online` value.
 - `receiveMode`: inbound receive mode. Use `websocket` for hosted kChat back-and-forth without a public callback URL, `webhook` for kChat outgoing webhooks, `both` during migrations, or `disabled` for outbound-only use.
 - `websocketProtocol`: use `infomaniak-echo` for hosted Infomaniak kChat. Use `mattermost` only for a plain Mattermost server.
-- `websocketChannelIds`: optional channel ids accepted from the WebSocket stream. Use this to restrict which kChat channels can trigger OpenClaw.
+- `websocketChannelScope`: WebSocket intake scope. Use `all` to accept every visible channel, or `selected` to require `websocketChannelIds`. If omitted, configured channel ids imply `selected`; no channel ids implies `all`.
+- `websocketChannelIds`: channel ids accepted from the WebSocket stream when `websocketChannelScope` is `selected`.
+- `websocketDedupeWindowMs`: milliseconds to suppress duplicate WebSocket posts by post id. Defaults to `120000`; set `0` to disable duplicate suppression.
 - `websocketUrl`, `websocketHost`, `websocketAppKey`, `websocketAuthEndpoint`, `websocketSubscriptions`, `websocketTeamId`, and `websocketTeamUserId`: advanced WebSocket overrides. Prefer defaults unless the deployment needs explicit values.
 - `webhookPath`: inbound outgoing webhook path, default `/channels/kchat/webhook`.
 - `outgoingWebhookTokenEnvName`: webhook verification token env var, default `INFOMANIAK_KCHAT_OUTGOING_WEBHOOK_TOKEN`.
@@ -52,13 +54,21 @@ channels: {
     receiveMode: "websocket",
     websocketProtocol: "infomaniak-echo",
     defaultChannel: "id:<channel-id>",
+    websocketChannelScope: "selected",
     websocketChannelIds: ["<channel-id>"],
+    websocketDedupeWindowMs: 120000,
     ignoredUserIds: ["<posting-user-id>"]
   }
 }
 ```
 
-In WebSocket mode, OpenClaw does not need a public webhook server for inbound kChat messages. Keep `INFOMANIAK_TOKEN` available to the OpenClaw process; Potassium connects to Infomaniak's Echo/Pusher-compatible socket, resolves the team and current-user ids from `teamName`, authenticates the private and presence subscriptions, and dispatches `posted` events into the `kchat` channel runtime.
+In WebSocket mode, OpenClaw does not need a public webhook server for inbound kChat messages. Keep `INFOMANIAK_TOKEN` available to the OpenClaw process; Potassium connects to Infomaniak's Echo/Pusher-compatible socket, resolves the team and current-user ids from `teamName`, authenticates the private and presence subscriptions, and dispatches live `posted` events into the `kchat` channel runtime. To listen globally, omit `websocketChannelIds` or set `websocketChannelScope: "all"` deliberately.
+
+When debugging inbound WebSocket delivery:
+
+- `receiveMode: "websocket"` observes live kChat events, but does not guarantee catch-up for messages sent while OpenClaw was offline.
+- A connected socket can still drop a frame before channel dispatch because the channel was not selected, the sender matched `ignoredUserIds` or `ignoredUserNames`, the post id was already inside the dedupe window, or the event was not a usable `posted` payload.
+- Drop diagnostics include reasons and identifiers only; they should not include kChat message text or token values.
 
 Use webhook mode only when the deployment needs kChat outgoing webhooks instead of a long-lived WebSocket. In webhook mode, configure a kChat outgoing webhook in Infomaniak/kChat to call the OpenClaw gateway URL plus `webhookPath`, put the verification token in the configured environment variable, and ignore the posting account. kChat/Mattermost payloads can be JSON or form-urlencoded, including form `payload` JSON.
 
