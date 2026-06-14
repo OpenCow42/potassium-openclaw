@@ -24,6 +24,7 @@ const DEFAULT_KCHAT_WEBSOCKET_RECONNECT_INITIAL_MS = 1000;
 const DEFAULT_KCHAT_WEBSOCKET_RECONNECT_MAX_MS = 30000;
 const DEFAULT_KCHAT_WEBSOCKET_PROTOCOL = "infomaniak-echo";
 const KCHAT_WEBSOCKET_PROTOCOLS = new Set(["infomaniak-echo", "mattermost"]);
+const DEFAULT_KCHAT_WEBSOCKET_CHANNEL_SCOPE = "selected";
 const KCHAT_WEBSOCKET_CHANNEL_SCOPES = new Set(["all", "selected"]);
 const DEFAULT_KCHAT_WEBSOCKET_DEDUPE_WINDOW_MS = 120000;
 const DEFAULT_KCHAT_WEBSOCKET_DEDUPE_MAX_ENTRIES = 10000;
@@ -119,8 +120,9 @@ export const PotassiumKchatChannelConfigJsonSchema = {
     websocketChannelScope: {
       type: "string",
       enum: ["all", "selected"],
+      default: DEFAULT_KCHAT_WEBSOCKET_CHANNEL_SCOPE,
       description:
-        "WebSocket inbound channel scope. Use all to accept every visible channel, or selected to require websocketChannelIds.",
+        'WebSocket inbound channel scope. Defaults to selected, which requires websocketChannelIds. Use all only to accept every visible channel deliberately.',
     },
     websocketUrl: {
       type: "string",
@@ -163,7 +165,7 @@ export const PotassiumKchatChannelConfigJsonSchema = {
       items: {
         type: "string",
       },
-      description: "Optional kChat channel IDs to accept from the WebSocket stream. When omitted, all visible posted events are accepted.",
+      description: 'kChat channel IDs to accept from the WebSocket stream when websocketChannelScope is selected.',
     },
     websocketDedupeWindowMs: {
       type: "number",
@@ -1885,7 +1887,11 @@ function resolveKchatWebSocketChannelScope(channelConfig) {
     return { scope: "selected", channelIds };
   }
 
-  return channelIds.length > 0 ? { scope: "selected", channelIds } : { scope: "all", channelIds: [] };
+  if (channelIds.length === 0) {
+    throw new Error('channels.kchat.websocketChannelIds is required unless websocketChannelScope="all".');
+  }
+
+  return { scope: "selected", channelIds };
 }
 
 function isDuplicateKchatWebSocketPost(payload, channelConfig, dedupeState, now = Date.now()) {

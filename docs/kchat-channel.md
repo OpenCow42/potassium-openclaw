@@ -47,7 +47,8 @@ the channel should only send outbound messages.
               defaultChannel: "id:<channel-id>",
               receiveMode: "websocket",
               websocketProtocol: "infomaniak-echo",
-              websocketChannelScope: "all",
+              websocketChannelScope: "selected",
+              websocketChannelIds: ["<channel-id>"],
               typingIndicator: true,
               setOnlineOnReplyStart: true
             }
@@ -100,8 +101,9 @@ and optional status updates.
 - `websocketTeamId`: optional kChat team ID override for Echo subscriptions.
 - `websocketTeamUserId`: optional kChat team user ID override for Echo
   subscriptions.
-- `websocketChannelScope`: `all` or `selected`. Use `all` to accept every
-  visible channel. Use `selected` with `websocketChannelIds` to restrict intake.
+- `websocketChannelScope`: `selected` or `all`. Defaults to `selected`, which
+  requires `websocketChannelIds`. Use `all` only when the install deliberately
+  accepts every visible channel.
 - `websocketChannelIds`: channel IDs accepted when the WebSocket scope is
   `selected`.
 - `websocketDedupeWindowMs`: milliseconds to suppress duplicate WebSocket posts
@@ -157,26 +159,25 @@ Use:
 
 ```json5
 {
-  websocketChannelScope: "all"
-}
-```
-
-to accept posts from every visible kChat channel.
-
-Use:
-
-```json5
-{
   websocketChannelScope: "selected",
   websocketChannelIds: ["<channel-id>"]
 }
 ```
 
-to restrict intake to specific kChat channel IDs.
+to restrict intake to specific kChat channel IDs. This is the default safety
+posture; omitting both `websocketChannelScope` and `websocketChannelIds` fails
+closed instead of accepting every visible channel.
 
-For compatibility, omitting `websocketChannelScope` preserves the older
-shorthand: configured `websocketChannelIds` means selected-channel intake, and no
-channel IDs means all visible channels.
+Use:
+
+```json5
+{
+  websocketChannelScope: "all"
+}
+```
+
+only when the install deliberately accepts posts from every visible kChat
+channel.
 
 For a plain Mattermost server, set `websocketProtocol: "mattermost"` and
 optionally `websocketUrl`.

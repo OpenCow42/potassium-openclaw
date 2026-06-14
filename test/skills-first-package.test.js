@@ -84,6 +84,7 @@ test("package declares a native OpenClaw plugin backed by the published liquid-p
   assert.equal(nativeManifest.channelConfigs?.kchat?.schema?.properties?.ignoredUserIds?.items?.type, "string");
   assert.equal(nativeManifest.channelConfigs?.kchat?.schema?.properties?.ignoredUserNames?.items?.type, "string");
   assert.deepEqual(nativeManifest.channelConfigs?.kchat?.schema?.properties?.websocketChannelScope?.enum, ["all", "selected"]);
+  assert.equal(nativeManifest.channelConfigs?.kchat?.schema?.properties?.websocketChannelScope?.default, "selected");
   assert.equal(nativeManifest.channelConfigs?.kchat?.schema?.properties?.websocketUrl?.type, "string");
   assert.equal(nativeManifest.channelConfigs?.kchat?.schema?.properties?.websocketHost?.default, "websocket.kchat.infomaniak.com");
   assert.equal(nativeManifest.channelConfigs?.kchat?.schema?.properties?.websocketAppKey?.default, "kchat-key");
@@ -1214,8 +1215,8 @@ test("kChat WebSocket helpers derive URLs and normalize posted events", async ()
 
   assert.deepEqual(
     await dispatchKchatWebSocketEvent({
-      cfg: { channels: { kchat: { teamName: "main-team", ignoredUserIds: ["user-123"] } } },
-      channelConfig: { teamName: "main-team", ignoredUserIds: ["user-123"] },
+      cfg: { channels: { kchat: { teamName: "main-team", websocketChannelScope: "all", ignoredUserIds: ["user-123"] } } },
+      channelConfig: { teamName: "main-team", websocketChannelScope: "all", ignoredUserIds: ["user-123"] },
       runtime: createKchatRuntimeStub({ inboundRuns }),
       frame,
     }),
@@ -1250,8 +1251,8 @@ test("kChat WebSocket helpers derive URLs and normalize posted events", async ()
   };
   assert.deepEqual(
     await dispatchKchatWebSocketEvent({
-      cfg: { channels: { kchat: { teamName: "main-team", defaultChannel: "id:configured-default-channel" } } },
-      channelConfig: { teamName: "main-team", defaultChannel: "id:configured-default-channel" },
+      cfg: { channels: { kchat: { teamName: "main-team", websocketChannelScope: "all", defaultChannel: "id:configured-default-channel" } } },
+      channelConfig: { teamName: "main-team", websocketChannelScope: "all", defaultChannel: "id:configured-default-channel" },
       runtime: createKchatRuntimeStub({ inboundRuns }),
       frame: missingChannelFrame,
     }),
@@ -1271,8 +1272,8 @@ test("kChat WebSocket helpers derive URLs and normalize posted events", async ()
   assert.equal(
     (
       await dispatchKchatWebSocketEvent({
-        cfg: { channels: { kchat: { teamName: "main-team" } } },
-        channelConfig: { teamName: "main-team" },
+        cfg: { channels: { kchat: { teamName: "main-team", websocketChannelScope: "all" } } },
+        channelConfig: { teamName: "main-team", websocketChannelScope: "all" },
         runtime: createKchatRuntimeStub({ inboundRuns: duplicateRuns }),
         frame,
         dedupeState,
@@ -1282,8 +1283,8 @@ test("kChat WebSocket helpers derive URLs and normalize posted events", async ()
   );
   assert.deepEqual(
     await dispatchKchatWebSocketEvent({
-      cfg: { channels: { kchat: { teamName: "main-team" } } },
-      channelConfig: { teamName: "main-team" },
+      cfg: { channels: { kchat: { teamName: "main-team", websocketChannelScope: "all" } } },
+      channelConfig: { teamName: "main-team", websocketChannelScope: "all" },
       runtime: createKchatRuntimeStub({ inboundRuns: duplicateRuns }),
       frame,
       dedupeState,
@@ -1305,8 +1306,8 @@ test("kChat WebSocket helpers derive URLs and normalize posted events", async ()
   assert.equal(
     (
       await dispatchKchatWebSocketEvent({
-        cfg: { channels: { kchat: { teamName: "main-team", websocketDedupeWindowMs: 0 } } },
-        channelConfig: { teamName: "main-team", websocketDedupeWindowMs: 0 },
+        cfg: { channels: { kchat: { teamName: "main-team", websocketChannelScope: "all", websocketDedupeWindowMs: 0 } } },
+        channelConfig: { teamName: "main-team", websocketChannelScope: "all", websocketDedupeWindowMs: 0 },
         runtime: createKchatRuntimeStub({ inboundRuns: noDedupeRuns }),
         frame,
         dedupeState: noDedupeState,
@@ -1317,8 +1318,8 @@ test("kChat WebSocket helpers derive URLs and normalize posted events", async ()
   assert.equal(
     (
       await dispatchKchatWebSocketEvent({
-        cfg: { channels: { kchat: { teamName: "main-team", websocketDedupeWindowMs: 0 } } },
-        channelConfig: { teamName: "main-team", websocketDedupeWindowMs: 0 },
+        cfg: { channels: { kchat: { teamName: "main-team", websocketChannelScope: "all", websocketDedupeWindowMs: 0 } } },
+        channelConfig: { teamName: "main-team", websocketChannelScope: "all", websocketDedupeWindowMs: 0 },
         runtime: createKchatRuntimeStub({ inboundRuns: noDedupeRuns }),
         frame,
         dedupeState: noDedupeState,
@@ -1333,8 +1334,8 @@ test("kChat WebSocket helpers derive URLs and normalize posted events", async ()
   assert.equal(
     (
       await dispatchKchatWebSocketEvent({
-        cfg: { channels: { kchat: { teamName: "main-team", websocketDedupeWindowMs: 1 } } },
-        channelConfig: { teamName: "main-team", websocketDedupeWindowMs: 1 },
+        cfg: { channels: { kchat: { teamName: "main-team", websocketChannelScope: "all", websocketDedupeWindowMs: 1 } } },
+        channelConfig: { teamName: "main-team", websocketChannelScope: "all", websocketDedupeWindowMs: 1 },
         runtime: createKchatRuntimeStub({ inboundRuns: expiredDedupeRuns }),
         frame,
         dedupeState: expiredDedupeState,
@@ -1352,8 +1353,8 @@ test("kChat WebSocket helpers derive URLs and normalize posted events", async ()
     assert.equal(
       (
         await dispatchKchatWebSocketEvent({
-          cfg: { channels: { kchat: { teamName: "main-team", websocketDedupeMaxEntries: 2 } } },
-          channelConfig: { teamName: "main-team", websocketDedupeMaxEntries: 2 },
+          cfg: { channels: { kchat: { teamName: "main-team", websocketChannelScope: "all", websocketDedupeMaxEntries: 2 } } },
+          channelConfig: { teamName: "main-team", websocketChannelScope: "all", websocketDedupeMaxEntries: 2 },
           runtime: createKchatRuntimeStub({ inboundRuns: cappedDedupeRuns }),
           frame: createFrame(postId),
           dedupeState: cappedDedupeState,
@@ -1366,8 +1367,8 @@ test("kChat WebSocket helpers derive URLs and normalize posted events", async ()
   assert.equal(
     (
       await dispatchKchatWebSocketEvent({
-        cfg: { channels: { kchat: { teamName: "main-team", websocketDedupeMaxEntries: 2 } } },
-        channelConfig: { teamName: "main-team", websocketDedupeMaxEntries: 2 },
+        cfg: { channels: { kchat: { teamName: "main-team", websocketChannelScope: "all", websocketDedupeMaxEntries: 2 } } },
+        channelConfig: { teamName: "main-team", websocketChannelScope: "all", websocketDedupeMaxEntries: 2 },
         runtime: createKchatRuntimeStub({ inboundRuns: cappedDedupeRuns }),
         frame: createFrame("post-cap-1"),
         dedupeState: cappedDedupeState,
@@ -1405,8 +1406,8 @@ test("kChat WebSocket inbound reply context preserves channel and thread roots",
   assert.equal(
     (
       await dispatchKchatWebSocketEvent({
-        cfg: { channels: { kchat: { teamName: "main-team", defaultChannel: "id:wrong-default-channel" } } },
-        channelConfig: { teamName: "main-team", defaultChannel: "id:wrong-default-channel" },
+        cfg: { channels: { kchat: { teamName: "main-team", websocketChannelScope: "all", defaultChannel: "id:wrong-default-channel" } } },
+        channelConfig: { teamName: "main-team", websocketChannelScope: "all", defaultChannel: "id:wrong-default-channel" },
         runtime: createKchatRuntimeStub({ inboundRuns: threadedRuns, realContext: true }),
         frame: threadedFrame,
       })
@@ -1448,8 +1449,8 @@ test("kChat WebSocket inbound reply context preserves channel and thread roots",
   assert.equal(
     (
       await dispatchKchatWebSocketEvent({
-        cfg: { channels: { kchat: { teamName: "main-team", defaultChannel: "id:wrong-default-channel" } } },
-        channelConfig: { teamName: "main-team", defaultChannel: "id:wrong-default-channel" },
+        cfg: { channels: { kchat: { teamName: "main-team", websocketChannelScope: "all", defaultChannel: "id:wrong-default-channel" } } },
+        channelConfig: { teamName: "main-team", websocketChannelScope: "all", defaultChannel: "id:wrong-default-channel" },
         runtime: createKchatRuntimeStub({ inboundRuns: rootRuns, realContext: true }),
         frame: rootFrame,
       })
@@ -1477,6 +1478,16 @@ test("kChat WebSocket connection authenticates and dispatches posted events", as
   const debugLogs = [];
   const abortController = new AbortController();
   MockWebSocket.instances = [];
+
+  await assert.rejects(
+    runKchatWebSocketConnection({
+      cfg: { channels: { kchat: { teamName: "main-team" } } },
+      channelConfig: { teamName: "main-team" },
+      token: websocketFixtureToken,
+      WebSocketImpl: MockWebSocket,
+    }),
+    /websocketChannelIds is required unless websocketChannelScope="all"/,
+  );
 
   await assert.rejects(
     runKchatWebSocketConnection({
@@ -1877,6 +1888,7 @@ test("kChat WebSocket gateway refreshes env token between reconnect attempts", a
   const channelConfig = {
     teamName: "main-team",
     websocketProtocol: "mattermost",
+    websocketChannelScope: "all",
     tokenEnvName,
     websocketReconnectInitialMs: 0,
     websocketReconnectMaxMs: 0,
@@ -1918,8 +1930,8 @@ test("kChat WebSocket gateway redacts reconnect failure warnings", async () => {
   }
 
   await startKchatWebSocketGatewayAccount({
-    cfg: { channels: { kchat: { teamName: "main-team", websocketProtocol: "mattermost" } } },
-    channelConfig: { teamName: "main-team", websocketProtocol: "mattermost", websocketReconnectInitialMs: 0 },
+    cfg: { channels: { kchat: { teamName: "main-team", websocketProtocol: "mattermost", websocketChannelScope: "all" } } },
+    channelConfig: { teamName: "main-team", websocketProtocol: "mattermost", websocketChannelScope: "all", websocketReconnectInitialMs: 0 },
     token: "placeholder-token",
     WebSocketImpl: ThrowingWebSocket,
     runtime: createKchatRuntimeStub({ inboundRuns: [] }),

@@ -181,7 +181,8 @@
               "all",
               "selected"
             ],
-            "description": "WebSocket inbound channel scope. Use all to accept every visible channel, or selected to require websocketChannelIds."
+            "default": "selected",
+            "description": "WebSocket inbound channel scope. Defaults to selected, which requires websocketChannelIds. Use all only to accept every visible channel deliberately."
           },
           "websocketUrl": {
             "type": "string",
@@ -221,7 +222,7 @@
             "items": {
               "type": "string"
             },
-            "description": "Optional kChat channel IDs to accept from the WebSocket stream. When omitted, all visible posted events are accepted."
+            "description": "kChat channel IDs to accept from the WebSocket stream when websocketChannelScope is selected."
           },
           "websocketDedupeWindowMs": {
             "type": "number",

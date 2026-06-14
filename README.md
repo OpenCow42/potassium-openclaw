@@ -147,7 +147,7 @@ The channel supports:
 - inbound receive modes: `webhook`, `websocket`, `both`, or `disabled`;
 - hosted Infomaniak Echo/Pusher WebSocket receive;
 - plain Mattermost WebSocket receive for compatible servers;
-- explicit all-channels or selected-channel WebSocket intake;
+- selected-channel WebSocket intake by default, with explicit all-channel opt-in;
 - duplicate suppression and bounded dispatch queueing;
 - native typing indicators for replies;
 - optional online status updates when OpenClaw starts preparing a reply.
