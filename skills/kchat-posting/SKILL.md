@@ -39,6 +39,8 @@ Useful `channels.kchat` config:
 - `websocketChannelScope`: WebSocket intake scope. Use `all` to accept every visible channel, or `selected` to require `websocketChannelIds`. If omitted, configured channel ids imply `selected`; no channel ids implies `all`.
 - `websocketChannelIds`: channel ids accepted from the WebSocket stream when `websocketChannelScope` is `selected`.
 - `websocketDedupeWindowMs`: milliseconds to suppress duplicate WebSocket posts by post id. Defaults to `120000`; set `0` to disable duplicate suppression.
+- `websocketDispatchConcurrency`: maximum number of WebSocket post events dispatched into OpenClaw at the same time. Defaults to `1`.
+- `websocketDispatchQueueSize`: maximum number of WebSocket post events waiting for dispatch before new events are dropped with `dispatch_queue_full`. Defaults to `100`.
 - `websocketUrl`, `websocketHost`, `websocketAppKey`, `websocketAuthEndpoint`, `websocketSubscriptions`, `websocketTeamId`, and `websocketTeamUserId`: advanced WebSocket overrides. Prefer defaults unless the deployment needs explicit values.
 - `webhookPath`: inbound outgoing webhook path, default `/channels/kchat/webhook`.
 - `outgoingWebhookTokenEnvName`: webhook verification token env var, default `INFOMANIAK_KCHAT_OUTGOING_WEBHOOK_TOKEN`.
@@ -63,12 +65,16 @@ channels: {
     websocketChannelScope: "selected",
     websocketChannelIds: ["<channel-id>"],
     websocketDedupeWindowMs: 120000,
+    websocketDispatchConcurrency: 1,
+    websocketDispatchQueueSize: 100,
     ignoredUserIds: ["<posting-user-id>"]
   }
 }
 ```
 
 In WebSocket mode, OpenClaw does not need a public webhook server for inbound kChat messages. Keep `INFOMANIAK_TOKEN` available to the OpenClaw process; Potassium connects to Infomaniak's Echo/Pusher-compatible socket, resolves the team and current-user ids from `teamName`, authenticates the private and presence subscriptions, and dispatches live `posted` events into the `kchat` channel runtime. To listen globally, omit `websocketChannelIds` or set `websocketChannelScope: "all"` deliberately.
+
+WebSocket dispatch into OpenClaw is bounded. If more post events arrive than `websocketDispatchConcurrency` plus `websocketDispatchQueueSize` can handle, the newest events are dropped with `dispatch_queue_full` diagnostics rather than starting unbounded concurrent reply work.
 
 For inbound replies, Potassium publishes native kChat typing events while OpenClaw works. Thread replies include the kChat root post id as the typing `parent_id`. `setOnlineOnReplyStart` is separate from outbound `setOnline`: it calls the kChat status endpoint with `online`, and that manual presence change may persist until kChat auto-updates it or another status is set.
 

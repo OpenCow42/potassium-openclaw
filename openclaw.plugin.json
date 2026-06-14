@@ -228,6 +228,18 @@
             "minimum": 0,
             "default": 120000,
             "description": "Milliseconds to suppress duplicate WebSocket posts by post id. Set to 0 to disable duplicate suppression."
+          },
+          "websocketDispatchConcurrency": {
+            "type": "integer",
+            "minimum": 1,
+            "default": 1,
+            "description": "Maximum number of WebSocket post events dispatched into OpenClaw at the same time."
+          },
+          "websocketDispatchQueueSize": {
+            "type": "integer",
+            "minimum": 0,
+            "default": 100,
+            "description": "Maximum number of WebSocket post events waiting for dispatch before new events are dropped."
           }
         }
       },

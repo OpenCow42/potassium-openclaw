@@ -88,6 +88,8 @@ test("package declares a native OpenClaw plugin backed by the published liquid-p
   assert.equal(nativeManifest.channelConfigs?.kchat?.schema?.properties?.websocketTeamUserId?.type, "string");
   assert.equal(nativeManifest.channelConfigs?.kchat?.schema?.properties?.websocketChannelIds?.items?.type, "string");
   assert.equal(nativeManifest.channelConfigs?.kchat?.schema?.properties?.websocketDedupeWindowMs?.default, 120000);
+  assert.equal(nativeManifest.channelConfigs?.kchat?.schema?.properties?.websocketDispatchConcurrency?.default, 1);
+  assert.equal(nativeManifest.channelConfigs?.kchat?.schema?.properties?.websocketDispatchQueueSize?.default, 100);
 
   assert.equal(codexManifest.name, "potassium");
   assert.equal(codexManifest.license, "Apache-2.0");
@@ -1494,6 +1496,145 @@ test("kChat WebSocket connection authenticates and dispatches posted events", as
   assert.equal(socket.closed, true);
 });
 
+test("kChat WebSocket dispatch queue bounds concurrent post handling", async () => {
+  const { runKchatWebSocketConnection } = await import(pathToFileURL(join(repositoryRoot, "index.js")).href);
+  const inboundRuns = [];
+  const dispatchResults = [];
+  const debugLogs = [];
+  const abortController = new AbortController();
+  let releaseFirstDispatch;
+  let firstDispatchStarted;
+  const firstDispatchStartedPromise = new Promise((resolve) => {
+    firstDispatchStarted = resolve;
+  });
+  const releaseFirstDispatchPromise = new Promise((resolve) => {
+    releaseFirstDispatch = resolve;
+  });
+  MockWebSocket.instances = [];
+
+  const connection = runKchatWebSocketConnection({
+    cfg: {
+      channels: {
+        kchat: {
+          teamName: "main-team",
+          websocketProtocol: "mattermost",
+          websocketChannelIds: ["channel-123"],
+          websocketDispatchConcurrency: 1,
+          websocketDispatchQueueSize: 1,
+        },
+      },
+    },
+    channelConfig: {
+      teamName: "main-team",
+      websocketProtocol: "mattermost",
+      websocketChannelIds: ["channel-123"],
+      websocketDispatchConcurrency: 1,
+      websocketDispatchQueueSize: 1,
+    },
+    token: "placeholder-token",
+    WebSocketImpl: MockWebSocket,
+    runtime: createKchatRuntimeStub({
+      inboundRuns,
+      async onInboundRun() {
+        if (inboundRuns.length === 1) {
+          firstDispatchStarted();
+          await releaseFirstDispatchPromise;
+        }
+      },
+    }),
+    abortSignal: abortController.signal,
+    log: {
+      debug(message) {
+        debugLogs.push(message);
+      },
+    },
+    onDispatchResult(result) {
+      dispatchResults.push(result);
+    },
+  });
+
+  await waitImmediate();
+  const socket = MockWebSocket.instances[0];
+  socket.emitMessage(
+    JSON.stringify({
+      status: "OK",
+      seq_reply: 1,
+    }),
+  );
+
+  const createPostedFrame = (postId) =>
+    JSON.stringify({
+      event: "posted",
+      data: {
+        channel_name: "test",
+        sender_name: "alice",
+        post: JSON.stringify({
+          id: postId,
+          channel_id: "channel-123",
+          user_id: "user-123",
+          message: `message body for ${postId} must not be logged`,
+          create_at: 1710000000000,
+        }),
+      },
+      broadcast: {
+        team_id: "team-123",
+      },
+      seq: 2,
+    });
+
+  socket.emitMessage(createPostedFrame("post-queue-1"));
+  socket.emitMessage(createPostedFrame("post-queue-2"));
+  socket.emitMessage(createPostedFrame("post-queue-3"));
+  await firstDispatchStartedPromise;
+  await flushAsyncCallbacks();
+
+  assert.equal(inboundRuns.length, 1);
+  assert.deepEqual(dispatchResults, [
+    {
+      dispatched: false,
+      reason: "dispatch_queue_full",
+      postId: "post-queue-3",
+      channelId: "channel-123",
+      teamId: "team-123",
+      userId: "user-123",
+      userName: "alice",
+    },
+  ]);
+  assert.match(debugLogs.join("\n"), /reason=dispatch_queue_full/);
+  assert.equal(debugLogs.join("\n").includes("message body for post-queue-3"), false);
+
+  releaseFirstDispatch();
+  for (let index = 0; inboundRuns.length < 2 && index < 8; index += 1) {
+    await waitImmediate();
+  }
+
+  assert.equal(inboundRuns.length, 2);
+  assert.deepEqual(dispatchResults.slice(1), [
+    {
+      dispatched: true,
+      inboundId: "post-queue-1",
+      postId: "post-queue-1",
+      channelId: "channel-123",
+      teamId: "team-123",
+      userId: "user-123",
+      userName: "alice",
+    },
+    {
+      dispatched: true,
+      inboundId: "post-queue-2",
+      postId: "post-queue-2",
+      channelId: "channel-123",
+      teamId: "team-123",
+      userId: "user-123",
+      userName: "alice",
+    },
+  ]);
+
+  abortController.abort();
+  await connection;
+  assert.equal(socket.closed, true);
+});
+
 test("kChat Infomaniak Echo WebSocket subscribes and dispatches posted events", async () => {
   const { runKchatWebSocketConnection } = await import(pathToFileURL(join(repositoryRoot, "index.js")).href);
   const inboundRuns = [];
@@ -1703,12 +1844,13 @@ async function flushAsyncCallbacks(iterations = 8) {
   }
 }
 
-function createKchatRuntimeStub({ inboundRuns, routeCalls = [], contextCalls = [], realContext = false }) {
+function createKchatRuntimeStub({ inboundRuns, routeCalls = [], contextCalls = [], realContext = false, onInboundRun }) {
   return {
     channel: {
       inbound: {
         async run(params) {
           inboundRuns.push(params);
+          await onInboundRun?.(params);
         },
         buildContext(params) {
           contextCalls.push(params);

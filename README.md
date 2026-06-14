@@ -76,6 +76,8 @@ Supported kChat channel config:
 - `websocketChannelScope`: WebSocket intake scope, either `all` or `selected`. When omitted, Potassium preserves the legacy shorthand: configured `websocketChannelIds` means `selected`, and no channel IDs means `all`.
 - `websocketChannelIds`: optional list of kChat channel IDs accepted from the WebSocket stream when the scope is `selected`.
 - `websocketDedupeWindowMs`: milliseconds to suppress duplicate WebSocket posts by post id. Defaults to `120000`; set `0` to disable duplicate suppression.
+- `websocketDispatchConcurrency`: maximum number of WebSocket post events dispatched into OpenClaw at the same time. Defaults to `1`.
+- `websocketDispatchQueueSize`: maximum number of WebSocket post events waiting for dispatch before new events are dropped with `dispatch_queue_full`. Defaults to `100`.
 
 Outbound destinations support `id:<channel_id>`, `#channel`, `channel`, and `team/channel`. Thread replies use the root post or reply id as the kChat thread root id.
 
@@ -90,6 +92,7 @@ Inbound replies publish a native kChat typing indicator by default. For threaded
 WebSocket troubleshooting notes:
 
 - A healthy socket only means Potassium is receiving live frames. OpenClaw dispatch can still drop a frame because the channel is not selected, the sender is ignored, the post id is already inside the dedupe window, or the payload is not a usable `posted` event.
+- WebSocket dispatch into OpenClaw is bounded by `websocketDispatchConcurrency` and `websocketDispatchQueueSize`. When the queue is full, new post events are dropped with `reason=dispatch_queue_full` rather than starting unbounded concurrent reply work.
 - Typing/status failures are logged as warnings and do not block the final reply. A healthy WebSocket does not guarantee typing or status calls were accepted by the kChat REST API.
 - Drop diagnostics log reason and identifiers such as post, channel, team, and user ids. They intentionally do not log message text or tokens.
 - WebSocket intake is live only. Messages sent while OpenClaw is offline are not guaranteed to be backfilled unless another workflow polls known channels.
@@ -115,7 +118,9 @@ Example non-secret kChat config:
       ignoredUserNames: ["<posting-user-name>"],
       websocketChannelScope: "selected",
       websocketChannelIds: ["<channel-id>"],
-      websocketDedupeWindowMs: 120000
+      websocketDedupeWindowMs: 120000,
+      websocketDispatchConcurrency: 1,
+      websocketDispatchQueueSize: 100
     }
   }
 }
@@ -203,7 +208,9 @@ openclaw config patch --stdin <<'JSON5'
               ignoredUserNames: ["<posting-user-name>"],
               websocketChannelScope: "selected",
               websocketChannelIds: ["<channel-id>"],
-              websocketDedupeWindowMs: 120000
+              websocketDedupeWindowMs: 120000,
+              websocketDispatchConcurrency: 1,
+              websocketDispatchQueueSize: 100
             }
           }
         }

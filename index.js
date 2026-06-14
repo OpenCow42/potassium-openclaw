@@ -26,6 +26,8 @@ const DEFAULT_KCHAT_WEBSOCKET_PROTOCOL = "infomaniak-echo";
 const KCHAT_WEBSOCKET_PROTOCOLS = new Set(["infomaniak-echo", "mattermost"]);
 const KCHAT_WEBSOCKET_CHANNEL_SCOPES = new Set(["all", "selected"]);
 const DEFAULT_KCHAT_WEBSOCKET_DEDUPE_WINDOW_MS = 120000;
+const DEFAULT_KCHAT_WEBSOCKET_DISPATCH_CONCURRENCY = 1;
+const DEFAULT_KCHAT_WEBSOCKET_DISPATCH_QUEUE_SIZE = 100;
 const DEFAULT_KCHAT_ECHO_WEBSOCKET_HOST = "websocket.kchat.infomaniak.com";
 const DEFAULT_KCHAT_ECHO_APP_KEY = "kchat-key";
 const KCHAT_CHANNEL_ID = "kchat";
@@ -168,6 +170,18 @@ export const PotassiumKchatChannelConfigJsonSchema = {
       default: DEFAULT_KCHAT_WEBSOCKET_DEDUPE_WINDOW_MS,
       description: "Milliseconds to suppress duplicate WebSocket posts by post id. Set to 0 to disable duplicate suppression.",
     },
+    websocketDispatchConcurrency: {
+      type: "integer",
+      minimum: 1,
+      default: DEFAULT_KCHAT_WEBSOCKET_DISPATCH_CONCURRENCY,
+      description: "Maximum number of WebSocket post events dispatched into OpenClaw at the same time.",
+    },
+    websocketDispatchQueueSize: {
+      type: "integer",
+      minimum: 0,
+      default: DEFAULT_KCHAT_WEBSOCKET_DISPATCH_QUEUE_SIZE,
+      description: "Maximum number of WebSocket post events waiting for dispatch before new events are dropped.",
+    },
   },
 };
 
@@ -261,6 +275,8 @@ export const potassiumKchatChannelPlugin = {
         const websocketTeamUserId = readOptionalString(inputRecord.websocketTeamUserId);
         const websocketChannelIds = readOptionalStringArray(inputRecord.websocketChannelIds);
         const websocketDedupeWindowMs = readOptionalNumber(inputRecord.websocketDedupeWindowMs);
+        const websocketDispatchConcurrency = readOptionalNumber(inputRecord.websocketDispatchConcurrency);
+        const websocketDispatchQueueSize = readOptionalNumber(inputRecord.websocketDispatchQueueSize);
 
         return {
           ...config,
@@ -293,6 +309,8 @@ export const potassiumKchatChannelPlugin = {
               ...(websocketTeamUserId ? { websocketTeamUserId } : {}),
               ...(websocketChannelIds ? { websocketChannelIds } : {}),
               ...(websocketDedupeWindowMs === undefined ? {} : { websocketDedupeWindowMs }),
+              ...(websocketDispatchConcurrency === undefined ? {} : { websocketDispatchConcurrency }),
+              ...(websocketDispatchQueueSize === undefined ? {} : { websocketDispatchQueueSize }),
             },
           },
         };
@@ -960,47 +978,75 @@ export async function runKchatWebSocketConnection(options = {}) {
 
   resolveKchatWebSocketChannelScope(channelConfig);
 
-  return await runLiquidKchatWebSocketConnection({
-    protocol: resolveKchatWebSocketProtocol(channelConfig),
-    token,
-    fetch: options.fetch,
-    webSocket: WebSocketImpl,
-    signal: options.abortSignal,
-    ...(teamName ? { teamName } : {}),
-    ...(apiBaseUrl ? { apiBaseUrl } : {}),
-    ...(websocketUrl ? { url: websocketUrl } : {}),
-    ...(websocketHost ? { host: websocketHost } : {}),
-    ...(websocketAppKey ? { appKey: websocketAppKey } : {}),
-    ...(websocketAuthEndpoint ? { authEndpoint: websocketAuthEndpoint } : {}),
-    ...(websocketSubscriptions ? { subscriptions: websocketSubscriptions } : {}),
-    ...(websocketTeamId ? { teamId: websocketTeamId } : {}),
-    ...(websocketTeamUserId ? { teamUserId: websocketTeamUserId } : {}),
-    onFrame: options.onFrame,
-    onAuthenticated: options.onAuthenticated,
-    onSubscribed: options.onSubscribed,
-    onPost(event) {
-      options.onPost?.(event);
-      dispatchKchatWebSocketPostEvent({
+  const dispatchQueue = createKchatWebSocketDispatchQueue({
+    channelConfig,
+    log: options.log,
+    dispatch: (inbound) =>
+      dispatchPreparedKchatWebSocketInbound({
         cfg: options.cfg,
         channelConfig,
         runtime: options.runtime,
-        event,
-        dedupeState,
+        inbound,
         client: options.client,
         createClient: options.createClient,
         fetch: options.fetch,
         token,
         log: options.log,
-      })
-        .then((result) => {
-          logKchatWebSocketDispatchResult(result, options.log);
-          options.onDispatchResult?.(result);
-        })
-        .catch((error) => {
-          options.log?.error?.(`kChat WebSocket dispatch failed: ${error instanceof Error ? error.message : String(error)}`);
-        });
+      }),
+    onResult(result) {
+      logKchatWebSocketDispatchResult(result, options.log);
+      options.onDispatchResult?.(result);
+    },
+    onError(error) {
+      options.log?.error?.(`kChat WebSocket dispatch failed: ${error instanceof Error ? error.message : String(error)}`);
     },
   });
+
+  try {
+    return await runLiquidKchatWebSocketConnection({
+      protocol: resolveKchatWebSocketProtocol(channelConfig),
+      token,
+      fetch: options.fetch,
+      webSocket: WebSocketImpl,
+      signal: options.abortSignal,
+      ...(teamName ? { teamName } : {}),
+      ...(apiBaseUrl ? { apiBaseUrl } : {}),
+      ...(websocketUrl ? { url: websocketUrl } : {}),
+      ...(websocketHost ? { host: websocketHost } : {}),
+      ...(websocketAppKey ? { appKey: websocketAppKey } : {}),
+      ...(websocketAuthEndpoint ? { authEndpoint: websocketAuthEndpoint } : {}),
+      ...(websocketSubscriptions ? { subscriptions: websocketSubscriptions } : {}),
+      ...(websocketTeamId ? { teamId: websocketTeamId } : {}),
+      ...(websocketTeamUserId ? { teamUserId: websocketTeamUserId } : {}),
+      onFrame: options.onFrame,
+      onAuthenticated: options.onAuthenticated,
+      onSubscribed: options.onSubscribed,
+      onPost(event) {
+        options.onPost?.(event);
+        const payload = normalizeKchatWebSocketPostEventPayload(event, channelConfig);
+        const prepared = prepareKchatWebSocketDispatchPayload(payload, channelConfig);
+        if (prepared.result) {
+          dispatchQueue.report(prepared.result);
+          return;
+        }
+
+        if (hasSeenKchatWebSocketPost(prepared.payload, channelConfig, dedupeState)) {
+          dispatchQueue.report(createKchatWebSocketDispatchDrop("duplicate_post", prepared.payload));
+          return;
+        }
+
+        if (!dispatchQueue.hasCapacity()) {
+          dispatchQueue.report(createKchatWebSocketDispatchQueueFullDrop(prepared.payload));
+          return;
+        }
+
+        markKchatWebSocketPostSeen(prepared.payload, channelConfig, dedupeState);
+        dispatchQueue.enqueue(prepared.inbound);
+      },
+    });
+  } finally {
+    await dispatchQueue.drain();
+  }
 }
 
 export const createKchatWebSocketAuthFrame = createLiquidKchatMattermostAuthFrame;
@@ -1024,72 +1070,78 @@ export function resolveKchatWebSocketUrl(channelConfig) {
 
 export async function dispatchKchatWebSocketEvent({ cfg, channelConfig, runtime, frame, dedupeState, client, createClient, fetch, token, log }) {
   const payload = normalizeKchatWebSocketPostEvent(frame, channelConfig);
-  if (!payload) {
-    return { dispatched: false, reason: "unsupported_event" };
+  const prepared = prepareKchatWebSocketDispatchPayload(payload, channelConfig);
+  if (prepared.result) {
+    return prepared.result;
   }
 
-  if (!isAllowedKchatWebSocketChannel(payload, channelConfig)) {
-    return createKchatWebSocketDispatchDrop("channel_not_allowed", payload);
+  if (isDuplicateKchatWebSocketPost(prepared.payload, channelConfig, dedupeState)) {
+    return createKchatWebSocketDispatchDrop("duplicate_post", prepared.payload);
   }
 
-  if (shouldIgnoreKchatWebhookPayload(payload, channelConfig)) {
-    return createKchatWebSocketDispatchDrop("ignored_sender", payload);
-  }
-
-  const inbound = normalizeKchatOutgoingWebhookPayload(payload);
-  if (!inbound) {
-    return createKchatWebSocketDispatchDrop("invalid_payload", payload);
-  }
-
-  if (!hasKchatInboundReplyRoute(inbound)) {
-    return createKchatWebSocketDispatchDrop("missing_reply_channel", payload);
-  }
-
-  if (isDuplicateKchatWebSocketPost(payload, channelConfig, dedupeState)) {
-    return createKchatWebSocketDispatchDrop("duplicate_post", payload);
-  }
-
-  await dispatchKchatInboundWebhookEvent({
+  return await dispatchPreparedKchatWebSocketInbound({
     cfg,
     channelConfig,
     runtime,
-    inbound,
+    inbound: prepared.inbound,
     client,
     createClient,
     fetch,
     token,
     log,
   });
-  return createKchatWebSocketDispatchSuccess(inbound);
 }
 
 export async function dispatchKchatWebSocketPostEvent({ cfg, channelConfig, runtime, event, dedupeState, client, createClient, fetch, token, log }) {
   const payload = normalizeKchatWebSocketPostEventPayload(event, channelConfig);
+  const prepared = prepareKchatWebSocketDispatchPayload(payload, channelConfig);
+  if (prepared.result) {
+    return prepared.result;
+  }
+
+  if (isDuplicateKchatWebSocketPost(prepared.payload, channelConfig, dedupeState)) {
+    return createKchatWebSocketDispatchDrop("duplicate_post", prepared.payload);
+  }
+
+  return await dispatchPreparedKchatWebSocketInbound({
+    cfg,
+    channelConfig,
+    runtime,
+    inbound: prepared.inbound,
+    client,
+    createClient,
+    fetch,
+    token,
+    log,
+  });
+}
+
+function prepareKchatWebSocketDispatchPayload(payload, channelConfig) {
   if (!payload) {
-    return { dispatched: false, reason: "unsupported_event" };
+    return { result: { dispatched: false, reason: "unsupported_event" } };
   }
 
   if (!isAllowedKchatWebSocketChannel(payload, channelConfig)) {
-    return createKchatWebSocketDispatchDrop("channel_not_allowed", payload);
+    return { result: createKchatWebSocketDispatchDrop("channel_not_allowed", payload) };
   }
 
   if (shouldIgnoreKchatWebhookPayload(payload, channelConfig)) {
-    return createKchatWebSocketDispatchDrop("ignored_sender", payload);
+    return { result: createKchatWebSocketDispatchDrop("ignored_sender", payload) };
   }
 
   const inbound = normalizeKchatOutgoingWebhookPayload(payload);
   if (!inbound) {
-    return createKchatWebSocketDispatchDrop("invalid_payload", payload);
+    return { result: createKchatWebSocketDispatchDrop("invalid_payload", payload) };
   }
 
   if (!hasKchatInboundReplyRoute(inbound)) {
-    return createKchatWebSocketDispatchDrop("missing_reply_channel", payload);
+    return { result: createKchatWebSocketDispatchDrop("missing_reply_channel", payload) };
   }
 
-  if (isDuplicateKchatWebSocketPost(payload, channelConfig, dedupeState)) {
-    return createKchatWebSocketDispatchDrop("duplicate_post", payload);
-  }
+  return { payload, inbound };
+}
 
+async function dispatchPreparedKchatWebSocketInbound({ cfg, channelConfig, runtime, inbound, client, createClient, fetch, token, log }) {
   await dispatchKchatInboundWebhookEvent({
     cfg,
     channelConfig,
@@ -1147,6 +1199,87 @@ function createKchatWebSocketDispatchDrop(reason, payload) {
     reason,
     ...createKchatWebSocketDispatchMetadata(payload),
   };
+}
+
+function createKchatWebSocketDispatchQueue(options) {
+  const channelConfig = options.channelConfig ?? {};
+  const concurrency = resolveKchatWebSocketDispatchConcurrency(channelConfig);
+  const maxQueued = resolveKchatWebSocketDispatchQueueSize(channelConfig);
+  const pending = [];
+  const drainResolvers = [];
+  let activeCount = 0;
+
+  const resolveDrained = () => {
+    if (activeCount > 0 || pending.length > 0) {
+      return;
+    }
+
+    while (drainResolvers.length > 0) {
+      drainResolvers.shift()?.();
+    }
+  };
+
+  const start = (event) => {
+    activeCount += 1;
+    Promise.resolve()
+      .then(() => options.dispatch(event))
+      .then((result) => {
+        options.onResult?.(result);
+      })
+      .catch((error) => {
+        options.onError?.(error);
+      })
+      .finally(() => {
+        activeCount -= 1;
+        runNext();
+      });
+  };
+
+  const runNext = () => {
+    while (activeCount < concurrency && pending.length > 0) {
+      start(pending.shift());
+    }
+    resolveDrained();
+  };
+
+  return {
+    hasCapacity() {
+      return activeCount < concurrency || pending.length < maxQueued;
+    },
+    report(result) {
+      logKchatWebSocketDispatchResult(result, options.log);
+      options.onResult?.(result);
+    },
+    enqueue(event) {
+      if (activeCount < concurrency) {
+        start(event);
+        return true;
+      }
+
+      if (pending.length >= maxQueued) {
+        const result = createKchatWebSocketDispatchQueueFullDrop(event, channelConfig);
+        logKchatWebSocketDispatchResult(result, options.log);
+        options.onResult?.(result);
+        return false;
+      }
+
+      pending.push(event);
+      return true;
+    },
+    drain() {
+      if (activeCount === 0 && pending.length === 0) {
+        return Promise.resolve();
+      }
+
+      return new Promise((resolve) => {
+        drainResolvers.push(resolve);
+      });
+    },
+  };
+}
+
+function createKchatWebSocketDispatchQueueFullDrop(payload) {
+  return createKchatWebSocketDispatchDrop("dispatch_queue_full", payload);
 }
 
 function createKchatWebSocketDispatchSuccess(inbound) {
@@ -1336,6 +1469,31 @@ function isKnownKchatWebSocketProtocol(protocol) {
 
 function isKnownKchatWebSocketChannelScope(scope) {
   return scope !== undefined && KCHAT_WEBSOCKET_CHANNEL_SCOPES.has(scope);
+}
+
+function resolveKchatWebSocketDispatchConcurrency(channelConfig) {
+  return resolveKchatIntegerConfig(
+    channelConfig.websocketDispatchConcurrency,
+    DEFAULT_KCHAT_WEBSOCKET_DISPATCH_CONCURRENCY,
+    1,
+  );
+}
+
+function resolveKchatWebSocketDispatchQueueSize(channelConfig) {
+  return resolveKchatIntegerConfig(
+    channelConfig.websocketDispatchQueueSize,
+    DEFAULT_KCHAT_WEBSOCKET_DISPATCH_QUEUE_SIZE,
+    0,
+  );
+}
+
+function resolveKchatIntegerConfig(value, defaultValue, minimum) {
+  const resolved = readOptionalNumber(value);
+  if (resolved === undefined || resolved < minimum) {
+    return defaultValue;
+  }
+
+  return Math.trunc(resolved);
 }
 
 function resolveKchatWebhookPath(channelConfig) {
@@ -1706,6 +1864,15 @@ function resolveKchatWebSocketChannelScope(channelConfig) {
 }
 
 function isDuplicateKchatWebSocketPost(payload, channelConfig, dedupeState, now = Date.now()) {
+  if (hasSeenKchatWebSocketPost(payload, channelConfig, dedupeState, now)) {
+    return true;
+  }
+
+  markKchatWebSocketPostSeen(payload, channelConfig, dedupeState, now);
+  return false;
+}
+
+function hasSeenKchatWebSocketPost(payload, channelConfig, dedupeState, now = Date.now()) {
   if (!(dedupeState instanceof Map)) {
     return false;
   }
@@ -1720,18 +1887,35 @@ function isDuplicateKchatWebSocketPost(payload, channelConfig, dedupeState, now 
     return false;
   }
 
+  pruneKchatWebSocketDedupeState(dedupeState, windowMs, now);
+  return dedupeState.has(postId);
+}
+
+function markKchatWebSocketPostSeen(payload, channelConfig, dedupeState, now = Date.now()) {
+  if (!(dedupeState instanceof Map)) {
+    return;
+  }
+
+  const windowMs = readOptionalNumber(channelConfig.websocketDedupeWindowMs) ?? DEFAULT_KCHAT_WEBSOCKET_DEDUPE_WINDOW_MS;
+  if (windowMs <= 0) {
+    return;
+  }
+
+  const postId = readOptionalString(payload.post_id) ?? readOptionalString(payload.postId) ?? readOptionalString(payload.id);
+  if (!postId) {
+    return;
+  }
+
+  pruneKchatWebSocketDedupeState(dedupeState, windowMs, now);
+  dedupeState.set(postId, now);
+}
+
+function pruneKchatWebSocketDedupeState(dedupeState, windowMs, now) {
   for (const [seenPostId, seenAt] of dedupeState) {
     if (now - seenAt > windowMs) {
       dedupeState.delete(seenPostId);
     }
   }
-
-  if (dedupeState.has(postId)) {
-    return true;
-  }
-
-  dedupeState.set(postId, now);
-  return false;
 }
 
 async function sleepWithAbort(ms, abortSignal) {
