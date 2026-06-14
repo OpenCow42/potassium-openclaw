@@ -824,7 +824,7 @@ export async function dispatchKchatWebSocketEvent({ cfg, channelConfig, runtime,
   }
 
   if (!isAllowedKchatWebSocketChannel(payload, channelConfig)) {
-    return createKchatWebSocketDispatchDrop("ignored_channel", payload);
+    return createKchatWebSocketDispatchDrop("channel_not_allowed", payload);
   }
 
   if (shouldIgnoreKchatWebhookPayload(payload, channelConfig)) {
@@ -856,7 +856,7 @@ export async function dispatchKchatWebSocketPostEvent({ cfg, channelConfig, runt
   }
 
   if (!isAllowedKchatWebSocketChannel(payload, channelConfig)) {
-    return createKchatWebSocketDispatchDrop("ignored_channel", payload);
+    return createKchatWebSocketDispatchDrop("channel_not_allowed", payload);
   }
 
   if (shouldIgnoreKchatWebhookPayload(payload, channelConfig)) {

@@ -578,7 +578,7 @@ test("kChat WebSocket helpers derive URLs and normalize posted events", async ()
     }),
     {
       dispatched: false,
-      reason: "ignored_channel",
+      reason: "channel_not_allowed",
       postId: "post-ws-123",
       channelId: "channel-123",
       teamId: "team-123",
@@ -809,7 +809,7 @@ test("kChat WebSocket connection authenticates and dispatches posted events", as
   assert.deepEqual(dispatchResults, [
     {
       dispatched: false,
-      reason: "ignored_channel",
+      reason: "channel_not_allowed",
       postId: "post-ws-ignored",
       channelId: "other-channel",
       teamId: "team-123",
@@ -835,7 +835,7 @@ test("kChat WebSocket connection authenticates and dispatches posted events", as
       userName: "alice",
     },
   ]);
-  assert.match(debugLogs.join("\n"), /reason=ignored_channel/);
+  assert.match(debugLogs.join("\n"), /reason=channel_not_allowed/);
   assert.match(debugLogs.join("\n"), /reason=ignored_sender/);
   assert.match(debugLogs.join("\n"), /postId=post-ws-ignored/);
   assert.equal(debugLogs.join("\n").includes("this text must not be logged"), false);
