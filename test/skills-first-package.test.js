@@ -646,6 +646,68 @@ test("kChat media outbound works with the published liquid-potassium client shap
   assert.deepEqual(result.fileIds, ["published-file-id"]);
 });
 
+test("kChat legacy outbound sendMedia uploads media through the channel plugin", async () => {
+  const { potassiumKchatChannelPlugin } = await import(pathToFileURL(join(repositoryRoot, "index.js")).href);
+  const tokenEnvName = "POTASSIUM_TEST_INFOMANIAK_TOKEN";
+  const originalToken = process.env[tokenEnvName];
+  const originalFetch = globalThis.fetch;
+  const requests = [];
+
+  process.env[tokenEnvName] = "placeholder-token";
+  globalThis.fetch = async (url, init = {}) => {
+    requests.push({
+      url: String(url),
+      method: init.method,
+      body: init.body,
+    });
+    if (String(url).endsWith("/api/v4/files")) {
+      return jsonResponse({ file_infos: [{ id: "legacy-file-id" }] });
+    }
+    if (String(url).endsWith("/api/v4/posts?set_online=false")) {
+      return jsonResponse({ id: "legacy-media-post", channel_id: "legacy-media-channel" });
+    }
+
+    throw new Error(`unexpected fetch ${url}`);
+  };
+
+  try {
+    var result = await potassiumKchatChannelPlugin.outbound.sendMedia({
+      cfg: { channels: { kchat: { teamName: "main-team", tokenEnvName, setOnline: false } } },
+      to: "id:legacy-media-channel",
+      text: "legacy outbound media",
+      mediaUrl: "/tmp/openclaw-kchat/legacy-outbound-image.png",
+      mediaLocalRoots: ["/tmp/openclaw-kchat"],
+      async mediaReadFile(filePath) {
+        assert.equal(filePath, "/tmp/openclaw-kchat/legacy-outbound-image.png");
+        return tinyPngBuffer;
+      },
+      threadId: "legacy-root-post",
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalToken === undefined) {
+      delete process.env[tokenEnvName];
+    } else {
+      process.env[tokenEnvName] = originalToken;
+    }
+  }
+
+  assert.equal(requests.length, 2);
+  assert.equal(requests[0].body instanceof FormData, true);
+  assert.equal(requests[0].body.get("channel_id"), "legacy-media-channel");
+  assert.equal(requests[0].body.getAll("files")[0].name, "legacy-outbound-image.png");
+  assert.deepEqual(JSON.parse(requests[1].body), {
+    channel_id: "legacy-media-channel",
+    message: "legacy outbound media",
+    file_ids: ["legacy-file-id"],
+    root_id: "legacy-root-post",
+  });
+  assert.equal(result.messageId, "legacy-media-post");
+  assert.equal(result.channelId, "legacy-media-channel");
+  assert.deepEqual(result.meta.kchatFileIds, ["legacy-file-id"]);
+  assert.equal(result.receipt.primaryPlatformMessageId, "legacy-media-post");
+});
+
 test("kChat inbound webhook dispatches valid JSON payloads through the channel runtime", async () => {
   const { createPotassiumKchatWebhookHandler } = await import(pathToFileURL(join(repositoryRoot, "index.js")).href);
   const inboundRuns = [];
