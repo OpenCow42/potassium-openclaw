@@ -1635,6 +1635,45 @@ test("kChat WebSocket dispatch queue bounds concurrent post handling", async () 
   assert.equal(socket.closed, true);
 });
 
+test("kChat WebSocket gateway refreshes env token between reconnect attempts", async () => {
+  const { startKchatWebSocketGatewayAccount } = await import(pathToFileURL(join(repositoryRoot, "index.js")).href);
+  const tokenEnvName = "POTASSIUM_TEST_KCHAT_WS_TOKEN";
+  const env = {
+    [tokenEnvName]: "token-one",
+  };
+  const abortController = new AbortController();
+  const channelConfig = {
+    teamName: "main-team",
+    websocketProtocol: "mattermost",
+    tokenEnvName,
+    websocketReconnectInitialMs: 0,
+    websocketReconnectMaxMs: 0,
+  };
+  MockWebSocket.instances = [];
+
+  const gateway = startKchatWebSocketGatewayAccount({
+    cfg: { channels: { kchat: channelConfig } },
+    channelConfig,
+    env,
+    WebSocketImpl: MockWebSocket,
+    runtime: createKchatRuntimeStub({ inboundRuns: [] }),
+    abortSignal: abortController.signal,
+  });
+
+  await waitForCondition(() => MockWebSocket.instances.length === 1 && MockWebSocket.instances[0].sent.length > 0);
+  assert.equal(JSON.parse(MockWebSocket.instances[0].sent[0]).data.token, "token-one");
+
+  env[tokenEnvName] = "token-two";
+  MockWebSocket.instances[0].close();
+
+  await waitForCondition(() => MockWebSocket.instances.length === 2 && MockWebSocket.instances[1].sent.length > 0);
+  assert.equal(JSON.parse(MockWebSocket.instances[1].sent[0]).data.token, "token-two");
+
+  abortController.abort();
+  await gateway;
+  assert.equal(MockWebSocket.instances[1].closed, true);
+});
+
 test("kChat Infomaniak Echo WebSocket subscribes and dispatches posted events", async () => {
   const { runKchatWebSocketConnection } = await import(pathToFileURL(join(repositoryRoot, "index.js")).href);
   const inboundRuns = [];
@@ -1929,6 +1968,17 @@ class MockWebSocket {
 
 async function waitImmediate() {
   await new Promise((resolve) => setImmediate(resolve));
+}
+
+async function waitForCondition(condition, message = "condition was not met") {
+  for (let index = 0; index < 20; index += 1) {
+    if (condition()) {
+      return;
+    }
+    await waitImmediate();
+  }
+
+  assert.fail(message);
 }
 
 function jsonResponse(payload) {

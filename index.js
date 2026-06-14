@@ -916,19 +916,23 @@ export async function dispatchKchatInboundWebhookEvent({ cfg, channelConfig, run
 
 export async function startKchatWebSocketGatewayAccount(options = {}) {
   const channelConfig = options.channelConfig ?? resolveKchatChannelConfig(options.cfg);
-  const token = options.token ?? readKchatBearerTokenFromEnv(channelConfig, options.env ?? globalThis.process?.env);
   const reconnectInitialMs =
     readOptionalNumber(channelConfig.websocketReconnectInitialMs) ?? DEFAULT_KCHAT_WEBSOCKET_RECONNECT_INITIAL_MS;
   const reconnectMaxMs = readOptionalNumber(channelConfig.websocketReconnectMaxMs) ?? DEFAULT_KCHAT_WEBSOCKET_RECONNECT_MAX_MS;
   const dedupeState = new Map();
   let reconnectDelayMs = reconnectInitialMs;
 
-  if (!token) {
+  if (!resolveKchatTokenFromOptions(options, channelConfig)) {
     throw new Error(`Set ${resolveKchatTokenEnvName(channelConfig)} in the environment before enabling kChat WebSocket receive mode.`);
   }
 
   while (!options.abortSignal?.aborted) {
     try {
+      const token = resolveKchatTokenFromOptions(options, channelConfig);
+      if (!token) {
+        throw new Error(`Set ${resolveKchatTokenEnvName(channelConfig)} in the environment before enabling kChat WebSocket receive mode.`);
+      }
+
       await runKchatWebSocketConnection({
         ...options,
         channelConfig,
@@ -1437,6 +1441,10 @@ function resolveKchatTokenEnvName(channelConfig) {
 
 function resolveKchatOutgoingWebhookTokenEnvName(channelConfig) {
   return readOptionalString(channelConfig.outgoingWebhookTokenEnvName) ?? DEFAULT_KCHAT_OUTGOING_WEBHOOK_TOKEN_ENV_NAME;
+}
+
+function resolveKchatTokenFromOptions(options, channelConfig) {
+  return readOptionalString(options.token) ?? readKchatBearerTokenFromEnv(channelConfig, options.env ?? globalThis.process?.env);
 }
 
 function resolveKchatReceiveMode(channelConfig) {
