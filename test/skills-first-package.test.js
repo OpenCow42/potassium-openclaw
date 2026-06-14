@@ -28,13 +28,12 @@ const dangerousRuntimeImports = [
   "worker_threads",
 ];
 const installSpecificKchatExamples = [
-  "example-team",
-  "<posting-user-name>",
-  "<channel-id>",
-  "<posting-user-id>",
-  "#support",
-  "example-team/support",
-  "channel `support`",
+  { label: "example-team", pattern: /example-team/ },
+  { label: "<posting-user-name>", pattern: /moo[.]moo/ },
+  { label: "test channel mention", pattern: /#support|`support`|channel `support`|example-team\/test/ },
+  { label: "local shorthand name", pattern: /\bhn\b/ },
+  { label: "local channel id", pattern: /<channel-id>/ },
+  { label: "local posting user id", pattern: /<posting-user-id>/ },
 ];
 
 test("package declares a native OpenClaw plugin backed by the published liquid-potassium package", async () => {
@@ -110,12 +109,13 @@ test("package declares a native OpenClaw plugin backed by the published liquid-p
 });
 
 test("shipped kChat docs avoid local install-specific examples", async () => {
-  const files = ["README.md", "openclaw.plugin.json", join("skills", "kchat-posting", "SKILL.md")];
+  const packageJson = JSON.parse(await readFile(join(repositoryRoot, "package.json"), "utf8"));
+  const files = await listPackagedTextFiles(packageJson.files);
 
   for (const file of files) {
-    const source = await readFile(join(repositoryRoot, file), "utf8");
-    for (const forbiddenValue of installSpecificKchatExamples) {
-      assert.equal(source.includes(forbiddenValue), false, `${file} must not include local kChat example ${forbiddenValue}`);
+    const source = await readFile(file, "utf8");
+    for (const { label, pattern } of installSpecificKchatExamples) {
+      assert.equal(pattern.test(source), false, `${relative(repositoryRoot, file)} must not include local kChat example ${label}`);
     }
   }
 });
@@ -1987,6 +1987,17 @@ async function listPackagedJavaScriptFiles(entries) {
   return files;
 }
 
+async function listPackagedTextFiles(entries) {
+  const files = [];
+
+  for (const entry of entries) {
+    const path = join(repositoryRoot, entry);
+    await collectTextFiles(path, files);
+  }
+
+  return files;
+}
+
 async function collectJavaScriptFiles(path, files) {
   const pathStat = await stat(path);
 
@@ -2005,6 +2016,37 @@ async function collectJavaScriptFiles(path, files) {
   for (const entry of entries) {
     await collectJavaScriptFiles(join(path, entry.name), files);
   }
+}
+
+async function collectTextFiles(path, files) {
+  const pathStat = await stat(path);
+
+  if (pathStat.isFile()) {
+    if (isPackagedTextFile(path)) {
+      files.push(path);
+    }
+    return;
+  }
+
+  if (!pathStat.isDirectory()) {
+    return;
+  }
+
+  const entries = await readdir(path, { withFileTypes: true });
+  for (const entry of entries) {
+    await collectTextFiles(join(path, entry.name), files);
+  }
+}
+
+function isPackagedTextFile(path) {
+  return (
+    path.endsWith(".js") ||
+    path.endsWith(".json") ||
+    path.endsWith(".md") ||
+    path.endsWith(".txt") ||
+    path.endsWith("LICENSE") ||
+    path.endsWith("SECURITY.md")
+  );
 }
 
 async function invokeWebhookHandler(handler, { body, contentType }) {
