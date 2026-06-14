@@ -1,40 +1,110 @@
-# potassium-openclaw
+# Potassium for OpenClaw
 
-OpenClaw plugin and skills for Infomaniak workflows backed by the `liquid-potassium` Node SDK.
+Potassium packages Infomaniak workflows for OpenClaw. It installs as a native
+OpenClaw plugin, registers Infomaniak tools backed by the published
+`liquid-potassium` SDK, and ships skills that help agents use those tools with
+the right safety defaults.
 
-This package no longer depends on an external executable. It registers native OpenClaw tools from `liquid-potassium` and ships skills that teach agents when to use those tools.
+It also includes a dedicated `kchat` OpenClaw channel for live Infomaniak kChat
+communication: outbound posts, inbound webhook or WebSocket events, threaded
+replies, typing indicators, and optional online presence.
 
-## License
+## Highlights
 
-This project is licensed under [Apache-2.0](LICENSE).
+- Native OpenClaw plugin. No external executable runtime and no vendored SDK
+  source.
+- Infomaniak tools for discovery, reviewed workflows, Mail application calls,
+  and raw API calls when policy allows them.
+- Skills for kDrive, Mail, kChat, URL shortener, and general Infomaniak tasks.
+- Dedicated kChat channel capability for post/reply workflows inside OpenClaw.
+- Environment-only credential handling. Direct bearer-token config is rejected.
+- Conservative mutation policy. Mutating operations are blocked by default.
+- Exact dependency pin on `liquid-potassium@0.3.0`.
 
-## Shape
+## Status
 
-- `index.js` registers the OpenClaw plugin and delegates tool construction to `liquid-potassium`.
-- `openclaw.plugin.json` declares the native plugin contract and tool names.
-- `.codex-plugin/plugin.json` keeps the Codex bundle metadata for local plugin development.
-- `skills/` provides task guidance for kDrive, Mail, kChat, URL shortener, and general Infomaniak workflows.
-- `docs/` records the architecture and dependency strategy.
-
-## Dependency
-
-`liquid-potassium` is consumed from npm and pinned to the published package version:
-
-```json
-"liquid-potassium": "0.3.0"
-```
-
-The published package includes built runtime output, so imports such as `liquid-potassium/openclaw/tools` work without install-time build scripts.
+This repository is the OpenClaw adapter and package layer for Infomaniak. The
+package metadata is ready for public npm publication, but the package is not
+published to npm or ClawHub yet. Install from a local checkout while developing,
+or from a pinned GitHub commit for regular use.
 
 ## Requirements
 
-- OpenClaw with native plugin support.
+- OpenClaw `2026.6.6` or newer.
 - Node.js 22 or newer.
-- `INFOMANIAK_TOKEN` available to the OpenClaw process, unless plugin config sets another `tokenEnvName`.
+- `INFOMANIAK_TOKEN` available to the OpenClaw process, unless plugin config
+  sets another `tokenEnvName`.
+
+## Install
+
+From this repository checkout:
+
+```sh
+openclaw plugins install --link .
+openclaw plugins enable potassium
+```
+
+From GitHub, pin a reviewed commit:
+
+```sh
+openclaw plugins install git:github.com/OpenCow42/potassium-openclaw@<commit-sha>
+openclaw plugins enable potassium
+```
+
+When replacing an existing copied install, pass `--force` to the same install
+command. Linked installs point directly at the checkout and do not need
+`--force`.
+
+If OpenClaw runs as a service, restart the gateway after installing or changing
+plugin code:
+
+```sh
+openclaw gateway restart
+```
+
+## Configure
+
+Default credential injection reads `INFOMANIAK_TOKEN`. Keep bearer/API tokens in
+environment variables only.
+
+```sh
+export INFOMANIAK_TOKEN="..."
+```
+
+Minimal explicit config:
+
+```sh
+openclaw config patch --stdin <<'JSON5'
+{
+  plugins: {
+    entries: {
+      potassium: {
+        enabled: true,
+        config: {
+          tokenEnvName: "INFOMANIAK_TOKEN",
+          blockMutating: true
+        }
+      }
+    }
+  }
+}
+JSON5
+```
+
+Useful plugin config fields:
+
+- `tokenEnvName`: environment variable name for the Infomaniak bearer token,
+  default `INFOMANIAK_TOKEN`.
+- `baseUrl`: optional Infomaniak API base URL override.
+- `mailApplicationBaseUrl`: optional Mail application API base URL override.
+- `allowedDomains`: optional domain allowlist.
+- `allowedOperations`: optional backing operation allowlist.
+- `deniedOperations`: optional backing operation denylist.
+- `blockMutating`: blocks mutating operations when `true`, default `true`.
 
 ## Tools
 
-The plugin registers these tools:
+Potassium registers these native OpenClaw tools:
 
 - `infomaniak_domains`
 - `infomaniak_search`
@@ -46,187 +116,41 @@ The plugin registers these tools:
 - `infomaniak_workflow_run`
 - `infomaniak_call`
 
-Prefer workflow tools for reviewed domain actions. Use search/describe/discover/call only when a reviewed workflow does not fit.
+Prefer reviewed workflow tools for domain actions. Use
+search/describe/discover/call only when a reviewed workflow does not fit.
+
+## Skills
+
+The package ships OpenClaw/Codex skill guidance under `skills/`:
+
+- `potassium`: general Infomaniak tool selection and safety rules.
+- `kdrive-writing`: kDrive workflows.
+- `mail-handling`: Infomaniak Mail workflows.
+- `kchat-posting`: kChat posting and channel guidance.
+- `url-shortener`: URL shortener workflows.
 
 ## kChat Channel
 
-The plugin also declares a dedicated OpenClaw channel capability named `kchat` for outbound kChat replies and inbound kChat events. Configure it under `channels.kchat` inside the Potassium plugin config.
+Potassium declares a dedicated OpenClaw channel capability named `kchat`. It can
+send messages to kChat, receive live events, and route OpenClaw replies back into
+the correct kChat channel or thread.
 
-Supported kChat channel config:
+The channel supports:
 
-- `teamName`: default kChat team name for resolving channel names.
-- `apiBaseUrl`: optional team-specific kChat API base URL. When omitted, Potassium derives `https://<teamName>.kchat.infomaniak.com` from a DNS-safe `teamName`.
-- `defaultChannel`: default destination for outbound-initiated posts. Inbound kChat replies ignore this value and route from the inbound event.
-- `setOnline`: optional `set_online` value sent with outbound posts.
-- `typingIndicator`: whether inbound OpenClaw replies should publish native kChat typing indicators while the reply is being prepared. Defaults to `true`.
-- `setOnlineOnReplyStart`: whether inbound OpenClaw replies should manually set the authenticated kChat user online before typing. When omitted, this is enabled only when `setOnline` is `true`.
-- `receiveMode`: inbound receive mode, one of `webhook`, `websocket`, `both`, or `disabled`. Defaults to `webhook`.
-- `websocketProtocol`: `infomaniak-echo` for hosted kChat, or `mattermost` for a plain Mattermost `/api/v4/websocket` server. Defaults to `infomaniak-echo`.
-- `webhookPath`: gateway path for inbound outgoing webhooks, default `/channels/kchat/webhook`.
-- `outgoingWebhookTokenEnvName`: environment variable for the webhook verification token, default `INFOMANIAK_KCHAT_OUTGOING_WEBHOOK_TOKEN`.
-- `ignoredUserIds`: sender user IDs to ignore for inbound events.
-- `ignoredUserNames`: sender usernames to ignore for inbound events.
-- `websocketUrl`: optional explicit WebSocket URL.
-- `websocketHost`: Infomaniak Echo socket host, default `websocket.kchat.infomaniak.com`.
-- `websocketAppKey`: Infomaniak Echo/Pusher app key, default `kchat-key`.
-- `websocketAuthEndpoint`: optional Echo private-channel auth endpoint, default `<apiBaseUrl>/broadcasting/auth`.
-- `websocketSubscriptions`: optional explicit Echo subscription channel names.
-- `websocketTeamId`: optional kChat team ID override for Echo subscriptions.
-- `websocketTeamUserId`: optional kChat team user ID override for Echo subscriptions.
-- `websocketChannelScope`: WebSocket intake scope, either `all` or `selected`. When omitted, Potassium preserves the legacy shorthand: configured `websocketChannelIds` means `selected`, and no channel IDs means `all`.
-- `websocketChannelIds`: optional list of kChat channel IDs accepted from the WebSocket stream when the scope is `selected`.
-- `websocketDedupeWindowMs`: milliseconds to suppress duplicate WebSocket posts by post id. Defaults to `120000`; set `0` to disable duplicate suppression.
-- `websocketDedupeMaxEntries`: maximum number of post ids retained in the WebSocket duplicate suppression cache. Defaults to `10000`.
-- `websocketDispatchConcurrency`: maximum number of WebSocket post events dispatched into OpenClaw at the same time. Defaults to `1`.
-- `websocketDispatchQueueSize`: maximum number of WebSocket post events waiting for dispatch before new events are dropped with `dispatch_queue_full`. Defaults to `100`.
+- outbound posts to `id:<channel_id>`, `#channel`, `channel`, or
+  `team/channel` destinations;
+- inbound receive modes: `webhook`, `websocket`, `both`, or `disabled`;
+- hosted Infomaniak Echo/Pusher WebSocket receive;
+- plain Mattermost WebSocket receive for compatible servers;
+- explicit all-channels or selected-channel WebSocket intake;
+- duplicate suppression and bounded dispatch queueing;
+- native typing indicators for replies;
+- optional online status updates when OpenClaw starts preparing a reply.
 
-Outbound destinations support `id:<channel_id>`, `#channel`, `channel`, and `team/channel`. Thread replies use the root post or reply id as the kChat thread root id.
+See [docs/kchat-channel.md](docs/kchat-channel.md) for setup, configuration,
+routing, and troubleshooting details.
 
-Inbound kChat events are the routing authority for replies. When an inbound event includes `channel_id`, OpenClaw replies are sent back to `id:<channel_id>` even if `defaultChannel` is configured. If the event includes `root_id`, replies stay in that existing thread. If the event is a root post with `post_id` and no `root_id`, replies are threaded under that original post. Events without `channel_id` are not allowed to fall back to `defaultChannel`; they are dropped or rejected as missing reply context.
-
-Inbound setup is intentionally environment-only for secrets. For webhook mode, create a kChat outgoing webhook in Infomaniak/kChat that points at the OpenClaw gateway URL plus `webhookPath`, set the webhook verification token in `INFOMANIAK_KCHAT_OUTGOING_WEBHOOK_TOKEN` or the configured env var, and add the posting account to `ignoredUserIds` or `ignoredUserNames` to avoid reply loops. kChat/Mattermost outgoing webhook payloads may arrive as JSON, form-urlencoded fields, or a form `payload` JSON value.
-
-For WebSocket mode against hosted Infomaniak kChat, set `receiveMode: "websocket"` or `"both"` and keep `INFOMANIAK_TOKEN` available to the OpenClaw process. The adapter connects to Infomaniak's Echo/Pusher-compatible socket, resolves the team/user IDs from `teamName`, authenticates `private-team.<team_id>` and `presence-teamUser.<user_id>` through `/broadcasting/auth`, and receives `posted` events without requiring a public callback URL. Set `websocketChannelScope: "all"` to accept every visible channel, or `websocketChannelScope: "selected"` with `websocketChannelIds` to limit which kChat channels can trigger OpenClaw. For compatibility, omitting `websocketChannelScope` still accepts all visible channels when `websocketChannelIds` is empty. For a plain Mattermost server, set `websocketProtocol: "mattermost"` and optionally `websocketUrl`.
-
-Inbound replies publish a native kChat typing indicator by default. For threaded replies, Potassium sends the typing event with the inbound thread root so kChat shows the indicator in the right conversation. If `setOnlineOnReplyStart` is `true`, Potassium also calls the kChat status endpoint once at reply start with `status: "online"`. This presence update is different from outbound post `setOnline`; it is a manual status change and may persist until kChat auto-updates it or another status change occurs.
-
-WebSocket troubleshooting notes:
-
-- A healthy socket only means Potassium is receiving live frames. OpenClaw dispatch can still drop a frame because the channel is not selected, the sender is ignored, the post id is already inside the dedupe window, or the payload is not a usable `posted` event.
-- WebSocket dispatch into OpenClaw is bounded by `websocketDispatchConcurrency` and `websocketDispatchQueueSize`. When the queue is full, new post events are dropped with `reason=dispatch_queue_full` rather than starting unbounded concurrent reply work.
-- Typing/status failures are logged as warnings and do not block the final reply. A healthy WebSocket does not guarantee typing or status calls were accepted by the kChat REST API.
-- Drop diagnostics log reason and identifiers such as post, channel, team, and user ids. They intentionally do not log message text or tokens.
-- WebSocket intake is live only. Messages sent while OpenClaw is offline are not guaranteed to be backfilled unless another workflow polls known channels.
-
-Example non-secret kChat config:
-
-```json5
-{
-  channels: {
-    kchat: {
-      enabled: true,
-      teamName: "example-team",
-      apiBaseUrl: "https://example-team.kchat.infomaniak.com",
-      defaultChannel: "id:<channel-id>",
-      setOnline: false,
-      typingIndicator: true,
-      setOnlineOnReplyStart: true,
-      receiveMode: "websocket",
-      websocketProtocol: "infomaniak-echo",
-      webhookPath: "/channels/kchat/webhook",
-      outgoingWebhookTokenEnvName: "INFOMANIAK_KCHAT_OUTGOING_WEBHOOK_TOKEN",
-      ignoredUserIds: ["<posting-user-id>"],
-      ignoredUserNames: ["<posting-user-name>"],
-      websocketChannelScope: "selected",
-      websocketChannelIds: ["<channel-id>"],
-      websocketDedupeWindowMs: 120000,
-      websocketDedupeMaxEntries: 10000,
-      websocketDispatchConcurrency: 1,
-      websocketDispatchQueueSize: 100
-    }
-  }
-}
-```
-
-The same channel could also be addressed as `#support`, `support`, or `example-team/support` when `teamName` is available. Bearer/API tokens and webhook verification tokens must stay in environment variables and must never be committed to plugin config.
-
-## Configuration
-
-Default credential injection reads `INFOMANIAK_TOKEN`. Direct bearer-token config is intentionally rejected by this adapter; use an environment variable instead. Supported plugin config includes:
-
-- `tokenEnvName`: environment variable name for the bearer token, default `INFOMANIAK_TOKEN`.
-- `baseUrl`: optional Infomaniak API base URL override.
-- `mailApplicationBaseUrl`: optional Mail application API base URL override.
-- `allowedDomains`: optional domain allowlist.
-- `allowedOperations`: optional backing operation allowlist.
-- `deniedOperations`: optional backing operation denylist.
-- `blockMutating`: defaults to `true`.
-
-Do not place bearer tokens in chat, docs, tests, OpenClaw config files, or committed config.
-
-## Install in OpenClaw
-
-The package is not published to npm or ClawHub yet. Install it from a local checkout while developing, or from a pinned GitHub commit for regular use.
-
-### 1. Prepare Credentials
-
-Create an Infomaniak API token with the product scopes needed for the workflows you want to use, then expose it to the OpenClaw process:
-
-```sh
-export INFOMANIAK_TOKEN="..."
-```
-
-Keep the token out of chat, docs, committed config, and shell history. If OpenClaw runs as a long-lived service, make sure `INFOMANIAK_TOKEN` is present in that service environment before starting or restarting it.
-
-### 2. Install The Plugin
-
-From this repository checkout:
-
-```sh
-openclaw plugins install --link .
-```
-
-From GitHub, pin a reviewed commit:
-
-```sh
-openclaw plugins install git:github.com/OpenCow42/potassium-openclaw@<commit-sha>
-```
-
-Use `--force` with the same install command when replacing an existing install.
-
-### 3. Enable And Configure
-
-Enable the plugin:
-
-```sh
-openclaw plugins enable potassium
-```
-
-The default configuration reads `INFOMANIAK_TOKEN`, keeps mutating operations blocked, and leaves all supported domains available. To make those defaults explicit or to add policy constraints, patch OpenClaw config:
-
-```sh
-openclaw config patch --stdin <<'JSON5'
-{
-  plugins: {
-    entries: {
-      potassium: {
-        enabled: true,
-        config: {
-          tokenEnvName: "INFOMANIAK_TOKEN",
-          blockMutating: true,
-          allowedDomains: ["kdrive", "mail", "kchat", "urlShortener"],
-          channels: {
-            kchat: {
-              enabled: true,
-              teamName: "example-team",
-              apiBaseUrl: "https://example-team.kchat.infomaniak.com",
-              defaultChannel: "id:<channel-id>",
-              typingIndicator: true,
-              setOnlineOnReplyStart: true,
-              receiveMode: "websocket",
-              websocketProtocol: "infomaniak-echo",
-              outgoingWebhookTokenEnvName: "INFOMANIAK_KCHAT_OUTGOING_WEBHOOK_TOKEN",
-              ignoredUserIds: ["<posting-user-id>"],
-              ignoredUserNames: ["<posting-user-name>"],
-              websocketChannelScope: "selected",
-              websocketChannelIds: ["<channel-id>"],
-              websocketDedupeWindowMs: 120000,
-              websocketDedupeMaxEntries: 10000,
-              websocketDispatchConcurrency: 1,
-              websocketDispatchQueueSize: 100
-            }
-          }
-        }
-      }
-    }
-  }
-}
-JSON5
-```
-
-Omit `allowedDomains` to allow every supported Infomaniak domain. Keep `blockMutating: true` unless you intentionally want write-capable tools available; mutating tool calls still require explicit confirmation from the caller.
-
-### 4. Verify Setup
+## Verify
 
 Check the installed plugin and runtime registration:
 
@@ -236,7 +160,8 @@ openclaw plugins list --enabled
 openclaw doctor
 ```
 
-After verification, ask OpenClaw to use the Potassium skills for an Infomaniak task. The plugin should register the `infomaniak_*` tools listed above.
+After verification, ask OpenClaw to use the Potassium skills for an Infomaniak
+task. The plugin should register the `infomaniak_*` tools listed above.
 
 ## Local Development
 
@@ -246,8 +171,24 @@ npm test
 npm run check
 ```
 
-The default test suite uses metadata and mocked registration checks only. It does not call live Infomaniak APIs.
+The default test suite uses metadata and mocked registration checks only. It
+does not call live Infomaniak APIs.
+
+## Documentation
+
+- [Architecture](docs/architecture.md)
+- [Liquid Potassium Integration](docs/liquid-potassium-integration.md)
+- [kChat Channel](docs/kchat-channel.md)
 
 ## Security
 
-Please see [SECURITY.md](SECURITY.md) for supported branches, vulnerability reporting, and credential-handling expectations.
+Please see [SECURITY.md](SECURITY.md) for supported branches, vulnerability
+reporting, and credential-handling expectations.
+
+Bearer/API tokens and webhook verification tokens must stay in environment
+variables. Do not place them in chat, docs, tests, OpenClaw config files, or
+committed config.
+
+## License
+
+This project is licensed under [Apache-2.0](LICENSE).
