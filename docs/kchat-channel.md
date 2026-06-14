@@ -9,7 +9,7 @@ credential setup live in the [README](../README.md).
 
 ## Capabilities
 
-- Send outbound text posts to kChat channels.
+- Send outbound text and media posts to kChat channels.
 - Resolve destinations by channel ID, channel name, or `team/channel`.
 - Receive inbound kChat events through outgoing webhooks or WebSockets.
 - Route replies from inbound events without falling back to a default channel.
