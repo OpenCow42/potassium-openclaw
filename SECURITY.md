@@ -2,7 +2,7 @@
 
 ## Supported Versions
 
-Security fixes target the current `0.3.x` release line until this package has a broader release policy.
+Security fixes target the current `0.4.x` release line until this package has a broader release policy.
 
 ## Reporting a Vulnerability
 

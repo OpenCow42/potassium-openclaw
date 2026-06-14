@@ -20,7 +20,8 @@ Use this skill to post to kChat through `infomaniak_workflow_run`.
 - Treat `createPost` and any create/update/delete kChat action as mutations.
 - Post only when the user explicitly requested it.
 - Preserve requested message text exactly, including capitalization and emoji.
-- Configure ignored inbound senders for the posting account to avoid loops.
+- Preserve the full original kChat message text when dispatching to OpenClaw; do not strip mentions.
+- In mention-mode channel setups, rely on automatic self-message filtering when identity can be resolved, and use explicit ignored sender lists or `ignoreSelfMessages` when the deployment needs a fixed override.
 
 ## Channel Capability
 
@@ -35,6 +36,9 @@ Useful `channels.kchat` config:
 - `typingIndicator`: native kChat typing indicator for inbound OpenClaw replies. Defaults to `true`.
 - `setOnlineOnReplyStart`: set the authenticated kChat user online once when an inbound reply starts. If omitted, it inherits `setOnline === true`.
 - `receiveMode`: inbound receive mode. Use `websocket` for hosted kChat back-and-forth without a public callback URL, `webhook` for kChat outgoing webhooks, `both` during migrations, or `disabled` for outbound-only use.
+- `responseMode`: inbound response policy. Defaults to `mentions`. Set `all` explicitly for global-listen behavior across every accepted inbound kChat message.
+- `mentionAliases`: additional complete mention or address aliases that should count as addressing this account.
+- `ignoreSelfMessages`: overrides self-message filtering. When omitted, self messages are ignored in `responseMode: "mentions"` and are not ignored in `responseMode: "all"`.
 - `websocketProtocol`: use `infomaniak-echo` for hosted Infomaniak kChat. Use `mattermost` only for a plain Mattermost server.
 - `websocketChannelScope`: WebSocket intake scope. Defaults to `selected`, which requires `websocketChannelIds`. The only way to accept every visible channel is to set `websocketChannelScope: "all"` deliberately.
 - `websocketChannelIds`: channel ids accepted from the WebSocket stream when `websocketChannelScope` is `selected`.
@@ -59,6 +63,9 @@ channels: {
     enabled: true,
     teamName: "example-team",
     receiveMode: "websocket",
+    responseMode: "mentions",
+    mentionAliases: ["SupportBot"],
+    ignoreSelfMessages: true,
     websocketProtocol: "infomaniak-echo",
     defaultChannel: "id:<channel-id>",
     typingIndicator: true,
@@ -74,7 +81,9 @@ channels: {
 }
 ```
 
-In WebSocket mode, OpenClaw does not need a public webhook server for inbound kChat messages. Keep `INFOMANIAK_TOKEN` available to the OpenClaw process; Potassium connects to Infomaniak's Echo/Pusher-compatible socket, resolves the team and current-user ids from `teamName`, authenticates the private and presence subscriptions, and dispatches live `posted` events into the `kchat` channel runtime. To listen globally, set `websocketChannelScope: "all"` deliberately; omitting `websocketChannelIds` alone fails closed.
+In WebSocket mode, OpenClaw does not need a public webhook server for inbound kChat messages. Keep `INFOMANIAK_TOKEN` available to the OpenClaw process; Potassium connects to Infomaniak's Echo/Pusher-compatible socket, resolves the team and current-user ids from `teamName`, authenticates the private and presence subscriptions, and dispatches live `posted` events into the `kchat` channel runtime. To accept every visible channel from the socket, set `websocketChannelScope: "all"` deliberately; omitting `websocketChannelIds` alone fails closed. To respond to every accepted message, also set `responseMode: "all"` explicitly.
+
+The default `responseMode: "mentions"` dispatches only when the authenticated kChat account is mentioned, a configured alias is addressed, the message is already in an existing thread, or the payload is a direct/group direct message with an available channel type. Mention text is preserved in the message OpenClaw receives.
 
 WebSocket dispatch into OpenClaw is bounded. If more post events arrive than `websocketDispatchConcurrency` plus `websocketDispatchQueueSize` can handle, the newest events are dropped with `dispatch_queue_full` diagnostics rather than starting unbounded concurrent reply work.
 

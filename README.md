@@ -23,10 +23,11 @@ replies, typing indicators, and optional online presence.
 
 ## Status
 
-This repository is the OpenClaw adapter and package layer for Infomaniak. The
-current GitHub release is `0.3.0`. Package metadata is ready for public npm or
-ClawHub publication; until it is published there, install from a local checkout
-while developing or from a pinned GitHub release for regular use.
+This repository is the OpenClaw adapter and package layer for Infomaniak. This
+branch prepares package and plugin metadata for version `0.4.0`; no GitHub
+release is implied until a reviewed tag is published. Until it is published to
+npm or ClawHub, install from a local checkout while developing or from a pinned
+reviewed GitHub release or commit for regular use.
 
 ## Requirements
 
@@ -44,10 +45,11 @@ openclaw plugins install --link .
 openclaw plugins enable potassium
 ```
 
-From GitHub, pin a reviewed release or commit:
+From GitHub, pin a reviewed release or commit. Once the `0.4.0` release is
+published, pin it explicitly:
 
 ```sh
-openclaw plugins install git:github.com/OpenCow42/potassium-openclaw@0.3.0
+openclaw plugins install git:github.com/OpenCow42/potassium-openclaw@0.4.0
 openclaw plugins enable potassium
 ```
 
@@ -145,6 +147,8 @@ The channel supports:
 - outbound posts to `id:<channel_id>`, `#channel`, `channel`, or
   `team/channel` destinations;
 - inbound receive modes: `webhook`, `websocket`, `both`, or `disabled`;
+- inbound response modes: default `responseMode: "mentions"` or explicit
+  `responseMode: "all"` for global-listen behavior;
 - hosted Infomaniak Echo/Pusher WebSocket receive;
 - plain Mattermost WebSocket receive for compatible servers;
 - selected-channel WebSocket intake by default; all-channel intake requires
@@ -152,6 +156,14 @@ The channel supports:
 - duplicate suppression and bounded dispatch queueing;
 - native typing indicators for replies;
 - optional online status updates when OpenClaw starts preparing a reply.
+
+In mention mode, inbound kChat events dispatch to OpenClaw only when the
+authenticated kChat account is mentioned, a configured alias is addressed, the
+message belongs to an existing thread, or the payload is a DM/group-DM and
+includes a channel type. Messages from the authenticated account are ignored by
+default in mention mode, with `ignoreSelfMessages` available as an explicit
+override. When a message is dispatched, OpenClaw receives the full original
+kChat text; mentions are preserved rather than stripped.
 
 See [docs/kchat-channel.md](docs/kchat-channel.md) for setup, configuration,
 routing, and troubleshooting details.

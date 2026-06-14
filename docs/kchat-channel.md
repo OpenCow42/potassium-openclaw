@@ -30,6 +30,30 @@ and prefer kChat outgoing webhooks.
 Use `receiveMode: "both"` during migrations or debugging, and `disabled` when
 the channel should only send outbound messages.
 
+## Response Modes
+
+The default response policy is `responseMode: "mentions"`. In mention mode,
+Potassium dispatches an inbound kChat event to OpenClaw only when at least one
+of these signals is present:
+
+- the message mentions the authenticated kChat account by username or display
+  name;
+- the message addresses a configured `mentionAliases` value;
+- the message is part of an existing kChat thread;
+- the payload is a direct message or group direct message and includes a
+  supported channel type.
+
+Set `responseMode: "all"` explicitly when the install should keep the
+global-listen behavior and dispatch every accepted inbound kChat message.
+Channel selection, ignored senders, duplicate suppression, and missing reply
+context checks still apply before dispatch.
+
+In mention mode, Potassium ignores messages from the authenticated kChat account
+by default to avoid self-reply loops. Set `ignoreSelfMessages` explicitly when a
+deployment needs to override that default. The full original kChat message text
+is preserved for OpenClaw when a message is dispatched; mention text is not
+stripped or rewritten.
+
 ## Minimal WebSocket Config
 
 ```json5
@@ -46,6 +70,7 @@ the channel should only send outbound messages.
               teamName: "example-team",
               defaultChannel: "id:<channel-id>",
               receiveMode: "websocket",
+              responseMode: "mentions",
               websocketProtocol: "infomaniak-echo",
               websocketChannelScope: "selected",
               websocketChannelIds: ["<channel-id>"],
@@ -83,6 +108,16 @@ and optional status updates.
   `setOnline` is `true`.
 - `receiveMode`: `webhook`, `websocket`, `both`, or `disabled`. Defaults to
   `webhook`.
+- `responseMode`: `mentions` or `all`. Defaults to `mentions`, where Potassium
+  responds only when the authenticated account or a configured alias is
+  addressed, when the message is in an existing thread, or when a DM/group-DM
+  payload includes its channel type. Set `all` explicitly for global-listen
+  behavior across every accepted inbound message.
+- `mentionAliases`: additional complete mention or address aliases that should
+  be treated as addressing this kChat account.
+- `ignoreSelfMessages`: overrides self-message filtering. When omitted,
+  self-message filtering is enabled in `responseMode: "mentions"` and disabled
+  in `responseMode: "all"`.
 - `websocketProtocol`: `infomaniak-echo` for hosted kChat, or `mattermost` for a
   plain Mattermost `/api/v4/websocket` server. Defaults to `infomaniak-echo`.
 - `webhookPath`: OpenClaw gateway path for kChat outgoing webhooks. Defaults to
@@ -179,6 +214,9 @@ Use:
 only when the install deliberately accepts posts from every visible kChat
 channel. Omitting `websocketChannelIds` does not request all-channel intake;
 all-channel intake requires `websocketChannelScope: "all"`.
+This controls which channels are accepted from the socket. It does not change
+the response policy; set `responseMode: "all"` separately when every accepted
+message should dispatch to OpenClaw.
 
 For a plain Mattermost server, set `websocketProtocol: "mattermost"` and
 optionally `websocketUrl`.
@@ -193,8 +231,10 @@ gateway URL plus `webhookPath`. Store the webhook verification token in
 kChat/Mattermost outgoing webhook payloads may arrive as JSON,
 form-urlencoded fields, or a form `payload` JSON value.
 
-Add the posting account to `ignoredUserIds` or `ignoredUserNames` to avoid reply
-loops.
+In mention mode, messages from the authenticated kChat account are ignored by
+default when Potassium can resolve that identity. For `responseMode: "all"` or
+deployments that prefer explicit static filters, add the posting account to
+`ignoredUserIds` or `ignoredUserNames` to avoid reply loops.
 
 ## Typing And Presence
 
@@ -232,6 +272,9 @@ and still lets OpenClaw generate and send the final reply.
               typingIndicator: true,
               setOnlineOnReplyStart: true,
               receiveMode: "websocket",
+              responseMode: "mentions",
+              mentionAliases: ["SupportBot"],
+              ignoreSelfMessages: true,
               websocketProtocol: "infomaniak-echo",
               webhookPath: "/channels/kchat/webhook",
               outgoingWebhookTokenEnvName: "INFOMANIAK_KCHAT_OUTGOING_WEBHOOK_TOKEN",

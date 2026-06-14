@@ -40,7 +40,7 @@ test("package declares a native OpenClaw plugin backed by the published liquid-p
   const codexManifest = JSON.parse(await readFile(join(repositoryRoot, ".codex-plugin", "plugin.json"), "utf8"));
 
   assert.equal(packageJson.private, undefined, "public bundle must not be marked private");
-  assert.equal(packageJson.version, "0.3.0");
+  assert.equal(packageJson.version, "0.4.0");
   assert.equal(packageLock.version, packageJson.version);
   assert.equal(packageLock.packages?.[""]?.version, packageJson.version);
   assert.equal(packageJson.license, "Apache-2.0");
@@ -59,6 +59,7 @@ test("package declares a native OpenClaw plugin backed by the published liquid-p
   assert.equal(packageJson.peerDependencies?.openclaw, ">=2026.6.6");
 
   assert.equal(nativeManifest.id, "potassium");
+  assert.equal(nativeManifest.version, packageJson.version);
   assert.equal(nativeManifest.name, "Potassium");
   assert.deepEqual(nativeManifest.skills, ["./skills"]);
   assert.deepEqual(nativeManifest.channels, expectedChannelIds);
