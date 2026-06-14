@@ -27,14 +27,11 @@ const dangerousRuntimeImports = [
   "node:worker_threads",
   "worker_threads",
 ];
-const installSpecificKchatExamples = [
-  { label: "example-team", pattern: /example-team/ },
-  { label: "<posting-user-name>", pattern: /moo[.]moo/ },
-  { label: "test channel mention", pattern: /#support|`support`|channel `support`|example-team\/test/ },
-  { label: "local shorthand name", pattern: /\bhn\b/ },
-  { label: "local channel id", pattern: /<channel-id>/ },
-  { label: "local posting user id", pattern: /<posting-user-id>/ },
+const packagedKchatLeakPatterns = [
+  { label: "workspace-specific known-values note", pattern: /known non-secret example values|this workspace/i },
+  { label: "concrete UUID example", pattern: /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i },
 ];
+const allowedKchatExampleHosts = new Set(["example-team", "websocket"]);
 
 test("package declares a native OpenClaw plugin backed by the published liquid-potassium package", async () => {
   const packageJson = JSON.parse(await readFile(join(repositoryRoot, "package.json"), "utf8"));
@@ -108,14 +105,22 @@ test("package declares a native OpenClaw plugin backed by the published liquid-p
   assert.equal(codexManifest.interface?.displayName, "Potassium");
 });
 
-test("shipped kChat docs avoid local install-specific examples", async () => {
+test("shipped kChat docs avoid install-specific examples", async () => {
   const packageJson = JSON.parse(await readFile(join(repositoryRoot, "package.json"), "utf8"));
   const files = await listPackagedTextFiles(packageJson.files);
 
   for (const file of files) {
     const source = await readFile(file, "utf8");
-    for (const { label, pattern } of installSpecificKchatExamples) {
-      assert.equal(pattern.test(source), false, `${relative(repositoryRoot, file)} must not include local kChat example ${label}`);
+    for (const { label, pattern } of packagedKchatLeakPatterns) {
+      assert.equal(pattern.test(source), false, `${relative(repositoryRoot, file)} must not include ${label}`);
+    }
+
+    for (const match of source.matchAll(/\b([a-z0-9-]+)[.]kchat[.]infomaniak[.]com\b/gi)) {
+      assert.equal(
+        allowedKchatExampleHosts.has(match[1]),
+        true,
+        `${relative(repositoryRoot, file)} must not include concrete kChat host ${match[0]}`,
+      );
     }
   }
 });
