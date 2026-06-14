@@ -663,6 +663,8 @@ function createKchatInboundReplyPipeline({ cfg, channelConfig, replyRoute, clien
 }
 
 export function createPotassiumKchatWebhookHandler(options = {}) {
+  const responseGateState = options.responseGateState ?? createKchatResponseGateState();
+
   return async (req, res) => {
     if (req.method !== "POST") {
       respondJson(res, 405, { ok: false, error: "method_not_allowed" });
@@ -709,7 +711,7 @@ export function createPotassiumKchatWebhookHandler(options = {}) {
     }
 
     try {
-      await dispatchKchatInboundWebhookEvent({
+      const dispatchResult = await dispatchKchatInboundWebhookEvent({
         cfg: options.cfg,
         channelConfig,
         runtime: options.runtime,
@@ -719,7 +721,12 @@ export function createPotassiumKchatWebhookHandler(options = {}) {
         fetch: options.fetch,
         token: options.token,
         log: options.log,
+        responseGateState,
       });
+      if (dispatchResult?.dispatched === false) {
+        respondJson(res, 200, { ok: true, status: "dropped" });
+        return true;
+      }
     } catch (error) {
       if (isKchatInboundReplyRoutingError(error)) {
         options.log?.warn?.(`kChat webhook dispatch dropped: ${error.message}`);
@@ -807,7 +814,32 @@ export function normalizeKchatOutgoingWebhookPayload(payload) {
   };
 }
 
-export async function dispatchKchatInboundWebhookEvent({ cfg, channelConfig, runtime, inbound, client, createClient, fetch, token, log }) {
+export async function dispatchKchatInboundWebhookEvent({
+  cfg,
+  channelConfig,
+  runtime,
+  inbound,
+  client,
+  createClient,
+  fetch,
+  token,
+  log,
+  responseGateState,
+}) {
+  const gateResult = await resolveKchatInboundResponseGate({
+    channelConfig,
+    inbound,
+    client,
+    createClient,
+    fetch,
+    token,
+    log,
+    responseGateState,
+  });
+  if (gateResult.dispatched === false) {
+    return createKchatInboundDispatchDrop(gateResult.reason, inbound);
+  }
+
   const channelRuntime = runtime?.channel;
   if (!channelRuntime?.inbound?.run) {
     throw new Error("OpenClaw channel inbound runtime is unavailable.");
@@ -952,6 +984,7 @@ export async function dispatchKchatInboundWebhookEvent({ cfg, channelConfig, run
       },
     },
   });
+  return createKchatInboundDispatchSuccess(inbound);
 }
 
 export async function startKchatWebSocketGatewayAccount(options = {}) {
@@ -960,6 +993,7 @@ export async function startKchatWebSocketGatewayAccount(options = {}) {
     readOptionalNumber(channelConfig.websocketReconnectInitialMs) ?? DEFAULT_KCHAT_WEBSOCKET_RECONNECT_INITIAL_MS;
   const reconnectMaxMs = readOptionalNumber(channelConfig.websocketReconnectMaxMs) ?? DEFAULT_KCHAT_WEBSOCKET_RECONNECT_MAX_MS;
   const dedupeState = new Map();
+  const responseGateState = options.responseGateState ?? createKchatResponseGateState();
   let reconnectDelayMs = reconnectInitialMs;
 
   if (!resolveKchatTokenFromOptions(options, channelConfig)) {
@@ -979,6 +1013,7 @@ export async function startKchatWebSocketGatewayAccount(options = {}) {
         token,
         runtime: options.runtime ?? { channel: options.channelRuntime },
         dedupeState,
+        responseGateState,
       });
       reconnectDelayMs = reconnectInitialMs;
     } catch (error) {
@@ -1019,6 +1054,7 @@ export async function runKchatWebSocketConnection(options = {}) {
   const websocketTeamId = readOptionalString(channelConfig.websocketTeamId);
   const websocketTeamUserId = readOptionalString(channelConfig.websocketTeamUserId);
   const dedupeState = options.dedupeState ?? new Map();
+  const responseGateState = options.responseGateState ?? createKchatResponseGateState();
 
   resolveKchatWebSocketChannelScope(channelConfig);
 
@@ -1036,6 +1072,7 @@ export async function runKchatWebSocketConnection(options = {}) {
         fetch: options.fetch,
         token,
         log: options.log,
+        responseGateState,
       }),
     onResult(result) {
       logKchatWebSocketDispatchResult(result, options.log);
@@ -1112,7 +1149,19 @@ export function resolveKchatWebSocketUrl(channelConfig) {
   });
 }
 
-export async function dispatchKchatWebSocketEvent({ cfg, channelConfig, runtime, frame, dedupeState, client, createClient, fetch, token, log }) {
+export async function dispatchKchatWebSocketEvent({
+  cfg,
+  channelConfig,
+  runtime,
+  frame,
+  dedupeState,
+  client,
+  createClient,
+  fetch,
+  token,
+  log,
+  responseGateState,
+}) {
   const payload = normalizeKchatWebSocketPostEvent(frame, channelConfig);
   const prepared = prepareKchatWebSocketDispatchPayload(payload, channelConfig);
   if (prepared.result) {
@@ -1133,10 +1182,23 @@ export async function dispatchKchatWebSocketEvent({ cfg, channelConfig, runtime,
     fetch,
     token,
     log,
+    responseGateState,
   });
 }
 
-export async function dispatchKchatWebSocketPostEvent({ cfg, channelConfig, runtime, event, dedupeState, client, createClient, fetch, token, log }) {
+export async function dispatchKchatWebSocketPostEvent({
+  cfg,
+  channelConfig,
+  runtime,
+  event,
+  dedupeState,
+  client,
+  createClient,
+  fetch,
+  token,
+  log,
+  responseGateState,
+}) {
   const payload = normalizeKchatWebSocketPostEventPayload(event, channelConfig);
   const prepared = prepareKchatWebSocketDispatchPayload(payload, channelConfig);
   if (prepared.result) {
@@ -1157,6 +1219,7 @@ export async function dispatchKchatWebSocketPostEvent({ cfg, channelConfig, runt
     fetch,
     token,
     log,
+    responseGateState,
   });
 }
 
@@ -1185,8 +1248,19 @@ function prepareKchatWebSocketDispatchPayload(payload, channelConfig) {
   return { payload, inbound };
 }
 
-async function dispatchPreparedKchatWebSocketInbound({ cfg, channelConfig, runtime, inbound, client, createClient, fetch, token, log }) {
-  await dispatchKchatInboundWebhookEvent({
+async function dispatchPreparedKchatWebSocketInbound({
+  cfg,
+  channelConfig,
+  runtime,
+  inbound,
+  client,
+  createClient,
+  fetch,
+  token,
+  log,
+  responseGateState,
+}) {
+  const dispatchResult = await dispatchKchatInboundWebhookEvent({
     cfg,
     channelConfig,
     runtime,
@@ -1196,7 +1270,12 @@ async function dispatchPreparedKchatWebSocketInbound({ cfg, channelConfig, runti
     fetch,
     token,
     log,
+    responseGateState,
   });
+  if (dispatchResult?.dispatched === false) {
+    return createKchatWebSocketDispatchDrop(dispatchResult.reason, inbound.raw ?? inbound);
+  }
+
   return createKchatWebSocketDispatchSuccess(inbound);
 }
 
@@ -1214,7 +1293,11 @@ function normalizeKchatWebSocketPostEventPayload(event, channelConfig = {}) {
 
   const channelId = readOptionalString(event.channelId);
   const channelName = readOptionalString(event.channelName);
-  const channelType = readOptionalString(event.channelType) ?? readOptionalString(event.channel_type);
+  const channelType =
+    readOptionalString(event.channelType) ??
+    readOptionalString(event.channel_type) ??
+    readOptionalString(event.rawPost?.channel_type) ??
+    readOptionalString(event.rawPost?.channelType);
   const teamDomain = readOptionalString(event.teamDomain) ?? readOptionalString(channelConfig.teamName);
   const teamId = readOptionalString(event.teamId);
   const postId = readOptionalString(event.postId) ?? readOptionalString(event.id);
@@ -1244,6 +1327,14 @@ function createKchatWebSocketDispatchDrop(reason, payload) {
     dispatched: false,
     reason,
     ...createKchatWebSocketDispatchMetadata(payload),
+  };
+}
+
+function createKchatInboundDispatchDrop(reason, inbound) {
+  return {
+    dispatched: false,
+    reason: readOptionalString(reason) ?? "not_addressed",
+    ...createKchatInboundDispatchMetadata(inbound),
   };
 }
 
@@ -1337,6 +1428,24 @@ function createKchatWebSocketDispatchSuccess(inbound) {
     ...(inbound.teamId ? { teamId: inbound.teamId } : {}),
     ...(inbound.sender.id ? { userId: inbound.sender.id } : {}),
     ...(inbound.sender.username ? { userName: inbound.sender.username } : {}),
+  };
+}
+
+function createKchatInboundDispatchSuccess(inbound) {
+  return {
+    dispatched: true,
+    inboundId: inbound.id,
+    postId: inbound.postId ?? inbound.id,
+    ...createKchatInboundDispatchMetadata(inbound),
+  };
+}
+
+function createKchatInboundDispatchMetadata(inbound) {
+  return {
+    ...(inbound?.channelId ? { channelId: inbound.channelId } : {}),
+    ...(inbound?.teamId ? { teamId: inbound.teamId } : {}),
+    ...(inbound?.sender?.id ? { userId: inbound.sender.id } : {}),
+    ...(inbound?.sender?.username ? { userName: inbound.sender.username } : {}),
   };
 }
 
@@ -1942,6 +2051,144 @@ export function resolveKchatInboundConversationKind(inbound) {
 export function isKchatDirectOrGroupDm(inbound) {
   const kind = resolveKchatInboundConversationKind(inbound);
   return kind === "direct" || kind === "group";
+}
+
+function createKchatResponseGateState() {
+  return {};
+}
+
+async function resolveKchatInboundResponseGate({
+  channelConfig = {},
+  inbound,
+  client,
+  createClient,
+  fetch,
+  token,
+  log,
+  responseGateState,
+}) {
+  const responseMode = resolveKchatResponseMode(channelConfig);
+  const ignoreSelfMessages = resolveKchatIgnoreSelfMessages(channelConfig, responseMode);
+  if (responseMode === "all" && !ignoreSelfMessages) {
+    return { dispatched: true };
+  }
+
+  const existingThread = hasKchatExistingThread(inbound);
+  const directOrGroupDm = isKchatDirectOrGroupDm(inbound);
+  const configuredAliases = resolveKchatConfiguredMentionAliases(channelConfig);
+  const addressedByConfiguredAlias = isKchatMessageAddressedToAliases(resolveKchatInboundMessageText(inbound), configuredAliases);
+  const addressedWithoutIdentity = existingThread || directOrGroupDm || addressedByConfiguredAlias;
+  const needsIdentity = ignoreSelfMessages || (responseMode === "mentions" && !addressedWithoutIdentity);
+  let identity;
+
+  if (needsIdentity) {
+    identity = await resolveKchatResponseGateIdentity({
+      channelConfig,
+      client,
+      createClient,
+      fetch,
+      token,
+      log,
+      responseGateState,
+    });
+
+    if (!identity) {
+      return addressedWithoutIdentity ? { dispatched: true } : { dispatched: false, reason: "not_addressed" };
+    }
+
+    if (ignoreSelfMessages && isKchatInboundAuthoredByIdentity(inbound, identity)) {
+      return { dispatched: false, reason: "self_message" };
+    }
+  }
+
+  if (responseMode === "all") {
+    return { dispatched: true };
+  }
+
+  if (addressedWithoutIdentity) {
+    return { dispatched: true };
+  }
+
+  const aliases = resolveKchatMentionAliases(identity, channelConfig);
+  return isKchatMessageAddressedToAliases(resolveKchatInboundMessageText(inbound), aliases)
+    ? { dispatched: true }
+    : { dispatched: false, reason: "not_addressed" };
+}
+
+function resolveKchatIgnoreSelfMessages(channelConfig, responseMode) {
+  const configured = readOptionalBoolean(isRecord(channelConfig) ? channelConfig.ignoreSelfMessages : undefined);
+  return configured ?? responseMode === "mentions";
+}
+
+async function resolveKchatResponseGateIdentity({ channelConfig, client, createClient, fetch, token, log, responseGateState }) {
+  const loadIdentity = async () => {
+    const resolvedClient = resolveKchatClient({
+      channelConfig,
+      client,
+      createClient,
+      fetch,
+      token,
+    });
+    return await resolveKchatCurrentUserIdentity(resolveKchatOperations(resolvedClient));
+  };
+
+  try {
+    if (!responseGateState) {
+      return await loadIdentity();
+    }
+
+    responseGateState.currentUserIdentityPromise ??= loadIdentity();
+    return await responseGateState.currentUserIdentityPromise;
+  } catch (error) {
+    if (responseGateState) {
+      responseGateState.currentUserIdentityPromise = undefined;
+    }
+    log?.warn?.(`kChat inbound response gate identity unavailable: ${formatKchatSafeError(error)}`);
+    return undefined;
+  }
+}
+
+function resolveKchatConfiguredMentionAliases(channelConfig) {
+  const config = isRecord(channelConfig) ? channelConfig : {};
+  return normalizeKchatMentionAliasList(readOptionalStringArray(config.mentionAliases) ?? []);
+}
+
+function resolveKchatInboundMessageText(inbound) {
+  if (!isRecord(inbound)) {
+    return undefined;
+  }
+
+  return (
+    readOptionalString(inbound.rawText) ??
+    readOptionalString(inbound.textForAgent) ??
+    readOptionalString(inbound.textForCommands) ??
+    readOptionalString(inbound.raw?.text)
+  );
+}
+
+function isKchatInboundAuthoredByIdentity(inbound, identity) {
+  const sender = resolveProviderUser(inbound?.sender);
+  const currentUser = resolveProviderUser(identity);
+  const senderId = sender.id ?? readOptionalString(inbound?.raw?.user_id) ?? readOptionalString(inbound?.raw?.userId);
+  if (senderId && currentUser.id && senderId === currentUser.id) {
+    return true;
+  }
+
+  const senderNames = [
+    sender.username,
+    sender.name,
+    readOptionalString(inbound?.raw?.user_name),
+    readOptionalString(inbound?.raw?.userName),
+  ]
+    .map(normalizeKchatIdentityName)
+    .filter(Boolean);
+  const currentUserNames = [currentUser.username, currentUser.name].map(normalizeKchatIdentityName).filter(Boolean);
+  return senderNames.some((senderName) => currentUserNames.includes(senderName));
+}
+
+function normalizeKchatIdentityName(value) {
+  const text = readOptionalString(value);
+  return text ? text.toLocaleLowerCase() : undefined;
 }
 
 function resolveKchatInboundChannelType(inbound) {
