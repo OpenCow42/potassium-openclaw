@@ -229,6 +229,12 @@
             "default": 120000,
             "description": "Milliseconds to suppress duplicate WebSocket posts by post id. Set to 0 to disable duplicate suppression."
           },
+          "websocketDedupeMaxEntries": {
+            "type": "integer",
+            "minimum": 1,
+            "default": 10000,
+            "description": "Maximum number of WebSocket post ids kept in the duplicate suppression cache."
+          },
           "websocketDispatchConcurrency": {
             "type": "integer",
             "minimum": 1,
@@ -316,6 +322,9 @@
         },
         "websocketDedupeWindowMs": {
           "label": "WebSocket dedupe window (ms)"
+        },
+        "websocketDedupeMaxEntries": {
+          "label": "WebSocket dedupe max entries"
         }
       }
     }

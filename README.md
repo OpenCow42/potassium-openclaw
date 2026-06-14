@@ -76,6 +76,7 @@ Supported kChat channel config:
 - `websocketChannelScope`: WebSocket intake scope, either `all` or `selected`. When omitted, Potassium preserves the legacy shorthand: configured `websocketChannelIds` means `selected`, and no channel IDs means `all`.
 - `websocketChannelIds`: optional list of kChat channel IDs accepted from the WebSocket stream when the scope is `selected`.
 - `websocketDedupeWindowMs`: milliseconds to suppress duplicate WebSocket posts by post id. Defaults to `120000`; set `0` to disable duplicate suppression.
+- `websocketDedupeMaxEntries`: maximum number of post ids retained in the WebSocket duplicate suppression cache. Defaults to `10000`.
 - `websocketDispatchConcurrency`: maximum number of WebSocket post events dispatched into OpenClaw at the same time. Defaults to `1`.
 - `websocketDispatchQueueSize`: maximum number of WebSocket post events waiting for dispatch before new events are dropped with `dispatch_queue_full`. Defaults to `100`.
 
@@ -119,6 +120,7 @@ Example non-secret kChat config:
       websocketChannelScope: "selected",
       websocketChannelIds: ["<channel-id>"],
       websocketDedupeWindowMs: 120000,
+      websocketDedupeMaxEntries: 10000,
       websocketDispatchConcurrency: 1,
       websocketDispatchQueueSize: 100
     }
@@ -209,6 +211,7 @@ openclaw config patch --stdin <<'JSON5'
               websocketChannelScope: "selected",
               websocketChannelIds: ["<channel-id>"],
               websocketDedupeWindowMs: 120000,
+              websocketDedupeMaxEntries: 10000,
               websocketDispatchConcurrency: 1,
               websocketDispatchQueueSize: 100
             }

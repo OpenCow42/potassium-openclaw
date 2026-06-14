@@ -39,6 +39,7 @@ Useful `channels.kchat` config:
 - `websocketChannelScope`: WebSocket intake scope. Use `all` to accept every visible channel, or `selected` to require `websocketChannelIds`. If omitted, configured channel ids imply `selected`; no channel ids implies `all`.
 - `websocketChannelIds`: channel ids accepted from the WebSocket stream when `websocketChannelScope` is `selected`.
 - `websocketDedupeWindowMs`: milliseconds to suppress duplicate WebSocket posts by post id. Defaults to `120000`; set `0` to disable duplicate suppression.
+- `websocketDedupeMaxEntries`: maximum number of post ids retained in the WebSocket duplicate suppression cache. Defaults to `10000`.
 - `websocketDispatchConcurrency`: maximum number of WebSocket post events dispatched into OpenClaw at the same time. Defaults to `1`.
 - `websocketDispatchQueueSize`: maximum number of WebSocket post events waiting for dispatch before new events are dropped with `dispatch_queue_full`. Defaults to `100`.
 - `websocketUrl`, `websocketHost`, `websocketAppKey`, `websocketAuthEndpoint`, `websocketSubscriptions`, `websocketTeamId`, and `websocketTeamUserId`: advanced WebSocket overrides. Prefer defaults unless the deployment needs explicit values.
@@ -65,6 +66,7 @@ channels: {
     websocketChannelScope: "selected",
     websocketChannelIds: ["<channel-id>"],
     websocketDedupeWindowMs: 120000,
+    websocketDedupeMaxEntries: 10000,
     websocketDispatchConcurrency: 1,
     websocketDispatchQueueSize: 100,
     ignoredUserIds: ["<posting-user-id>"]

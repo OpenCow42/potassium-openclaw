@@ -26,6 +26,7 @@ const DEFAULT_KCHAT_WEBSOCKET_PROTOCOL = "infomaniak-echo";
 const KCHAT_WEBSOCKET_PROTOCOLS = new Set(["infomaniak-echo", "mattermost"]);
 const KCHAT_WEBSOCKET_CHANNEL_SCOPES = new Set(["all", "selected"]);
 const DEFAULT_KCHAT_WEBSOCKET_DEDUPE_WINDOW_MS = 120000;
+const DEFAULT_KCHAT_WEBSOCKET_DEDUPE_MAX_ENTRIES = 10000;
 const DEFAULT_KCHAT_WEBSOCKET_DISPATCH_CONCURRENCY = 1;
 const DEFAULT_KCHAT_WEBSOCKET_DISPATCH_QUEUE_SIZE = 100;
 const DEFAULT_KCHAT_ECHO_WEBSOCKET_HOST = "websocket.kchat.infomaniak.com";
@@ -170,6 +171,12 @@ export const PotassiumKchatChannelConfigJsonSchema = {
       default: DEFAULT_KCHAT_WEBSOCKET_DEDUPE_WINDOW_MS,
       description: "Milliseconds to suppress duplicate WebSocket posts by post id. Set to 0 to disable duplicate suppression.",
     },
+    websocketDedupeMaxEntries: {
+      type: "integer",
+      minimum: 1,
+      default: DEFAULT_KCHAT_WEBSOCKET_DEDUPE_MAX_ENTRIES,
+      description: "Maximum number of WebSocket post ids kept in the duplicate suppression cache.",
+    },
     websocketDispatchConcurrency: {
       type: "integer",
       minimum: 1,
@@ -275,6 +282,7 @@ export const potassiumKchatChannelPlugin = {
         const websocketTeamUserId = readOptionalString(inputRecord.websocketTeamUserId);
         const websocketChannelIds = readOptionalStringArray(inputRecord.websocketChannelIds);
         const websocketDedupeWindowMs = readOptionalNumber(inputRecord.websocketDedupeWindowMs);
+        const websocketDedupeMaxEntries = readOptionalNumber(inputRecord.websocketDedupeMaxEntries);
         const websocketDispatchConcurrency = readOptionalNumber(inputRecord.websocketDispatchConcurrency);
         const websocketDispatchQueueSize = readOptionalNumber(inputRecord.websocketDispatchQueueSize);
 
@@ -309,6 +317,7 @@ export const potassiumKchatChannelPlugin = {
               ...(websocketTeamUserId ? { websocketTeamUserId } : {}),
               ...(websocketChannelIds ? { websocketChannelIds } : {}),
               ...(websocketDedupeWindowMs === undefined ? {} : { websocketDedupeWindowMs }),
+              ...(websocketDedupeMaxEntries === undefined ? {} : { websocketDedupeMaxEntries }),
               ...(websocketDispatchConcurrency === undefined ? {} : { websocketDispatchConcurrency }),
               ...(websocketDispatchQueueSize === undefined ? {} : { websocketDispatchQueueSize }),
             },
@@ -1479,6 +1488,14 @@ function isKnownKchatWebSocketChannelScope(scope) {
   return scope !== undefined && KCHAT_WEBSOCKET_CHANNEL_SCOPES.has(scope);
 }
 
+function resolveKchatWebSocketDedupeMaxEntries(channelConfig) {
+  return resolveKchatIntegerConfig(
+    channelConfig.websocketDedupeMaxEntries,
+    DEFAULT_KCHAT_WEBSOCKET_DEDUPE_MAX_ENTRIES,
+    1,
+  );
+}
+
 function resolveKchatWebSocketDispatchConcurrency(channelConfig) {
   return resolveKchatIntegerConfig(
     channelConfig.websocketDispatchConcurrency,
@@ -1895,8 +1912,17 @@ function hasSeenKchatWebSocketPost(payload, channelConfig, dedupeState, now = Da
     return false;
   }
 
-  pruneKchatWebSocketDedupeState(dedupeState, windowMs, now);
-  return dedupeState.has(postId);
+  const seenAt = dedupeState.get(postId);
+  if (seenAt === undefined) {
+    return false;
+  }
+
+  if (now - seenAt > windowMs) {
+    dedupeState.delete(postId);
+    return false;
+  }
+
+  return true;
 }
 
 function markKchatWebSocketPostSeen(payload, channelConfig, dedupeState, now = Date.now()) {
@@ -1914,15 +1940,18 @@ function markKchatWebSocketPostSeen(payload, channelConfig, dedupeState, now = D
     return;
   }
 
-  pruneKchatWebSocketDedupeState(dedupeState, windowMs, now);
+  dedupeState.delete(postId);
   dedupeState.set(postId, now);
+  trimKchatWebSocketDedupeState(dedupeState, resolveKchatWebSocketDedupeMaxEntries(channelConfig));
 }
 
-function pruneKchatWebSocketDedupeState(dedupeState, windowMs, now) {
-  for (const [seenPostId, seenAt] of dedupeState) {
-    if (now - seenAt > windowMs) {
-      dedupeState.delete(seenPostId);
+function trimKchatWebSocketDedupeState(dedupeState, maxEntries) {
+  while (dedupeState.size > maxEntries) {
+    const oldestPostId = dedupeState.keys().next().value;
+    if (oldestPostId === undefined) {
+      return;
     }
+    dedupeState.delete(oldestPostId);
   }
 }
 

@@ -88,6 +88,7 @@ test("package declares a native OpenClaw plugin backed by the published liquid-p
   assert.equal(nativeManifest.channelConfigs?.kchat?.schema?.properties?.websocketTeamUserId?.type, "string");
   assert.equal(nativeManifest.channelConfigs?.kchat?.schema?.properties?.websocketChannelIds?.items?.type, "string");
   assert.equal(nativeManifest.channelConfigs?.kchat?.schema?.properties?.websocketDedupeWindowMs?.default, 120000);
+  assert.equal(nativeManifest.channelConfigs?.kchat?.schema?.properties?.websocketDedupeMaxEntries?.default, 10000);
   assert.equal(nativeManifest.channelConfigs?.kchat?.schema?.properties?.websocketDispatchConcurrency?.default, 1);
   assert.equal(nativeManifest.channelConfigs?.kchat?.schema?.properties?.websocketDispatchQueueSize?.default, 100);
 
@@ -1080,6 +1081,19 @@ test("kChat WebSocket helpers derive URLs and normalize posted events", async ()
     },
     seq: 2,
   };
+  const createFrame = (postId) => ({
+    ...frame,
+    data: {
+      ...frame.data,
+      post: JSON.stringify({
+        id: postId,
+        channel_id: "channel-123",
+        user_id: "user-123",
+        message: `message for ${postId}`,
+        create_at: 1710000000000,
+      }),
+    },
+  });
 
   assert.deepEqual(normalizeKchatWebSocketPostEvent(frame, { teamName: "main-team" }), {
     channel_id: "channel-123",
@@ -1246,6 +1260,56 @@ test("kChat WebSocket helpers derive URLs and normalize posted events", async ()
     true,
   );
   assert.equal(noDedupeRuns.length, 2);
+
+  const expiredDedupeRuns = [];
+  const expiredDedupeState = new Map([["post-ws-123", Date.now() - 10_000]]);
+  assert.equal(
+    (
+      await dispatchKchatWebSocketEvent({
+        cfg: { channels: { kchat: { teamName: "main-team", websocketDedupeWindowMs: 1 } } },
+        channelConfig: { teamName: "main-team", websocketDedupeWindowMs: 1 },
+        runtime: createKchatRuntimeStub({ inboundRuns: expiredDedupeRuns }),
+        frame,
+        dedupeState: expiredDedupeState,
+      })
+    ).dispatched,
+    true,
+  );
+  assert.equal(expiredDedupeRuns.length, 1);
+  assert.equal(expiredDedupeState.size, 1);
+  assert.equal(expiredDedupeState.has("post-ws-123"), true);
+
+  const cappedDedupeRuns = [];
+  const cappedDedupeState = new Map();
+  for (const postId of ["post-cap-1", "post-cap-2", "post-cap-3"]) {
+    assert.equal(
+      (
+        await dispatchKchatWebSocketEvent({
+          cfg: { channels: { kchat: { teamName: "main-team", websocketDedupeMaxEntries: 2 } } },
+          channelConfig: { teamName: "main-team", websocketDedupeMaxEntries: 2 },
+          runtime: createKchatRuntimeStub({ inboundRuns: cappedDedupeRuns }),
+          frame: createFrame(postId),
+          dedupeState: cappedDedupeState,
+        })
+      ).dispatched,
+      true,
+    );
+  }
+  assert.deepEqual([...cappedDedupeState.keys()], ["post-cap-2", "post-cap-3"]);
+  assert.equal(
+    (
+      await dispatchKchatWebSocketEvent({
+        cfg: { channels: { kchat: { teamName: "main-team", websocketDedupeMaxEntries: 2 } } },
+        channelConfig: { teamName: "main-team", websocketDedupeMaxEntries: 2 },
+        runtime: createKchatRuntimeStub({ inboundRuns: cappedDedupeRuns }),
+        frame: createFrame("post-cap-1"),
+        dedupeState: cappedDedupeState,
+      })
+    ).dispatched,
+    true,
+  );
+  assert.equal(cappedDedupeRuns.length, 4);
+  assert.deepEqual([...cappedDedupeState.keys()], ["post-cap-3", "post-cap-1"]);
 });
 
 test("kChat WebSocket inbound reply context preserves channel and thread roots", async () => {
@@ -1584,12 +1648,32 @@ test("kChat WebSocket dispatch queue bounds concurrent post handling", async () 
 
   socket.emitMessage(createPostedFrame("post-queue-1"));
   socket.emitMessage(createPostedFrame("post-queue-2"));
+  socket.emitMessage(createPostedFrame("post-queue-1"));
+  socket.emitMessage(createPostedFrame("post-queue-2"));
   socket.emitMessage(createPostedFrame("post-queue-3"));
   await firstDispatchStartedPromise;
   await flushAsyncCallbacks();
 
   assert.equal(inboundRuns.length, 1);
   assert.deepEqual(dispatchResults, [
+    {
+      dispatched: false,
+      reason: "duplicate_post",
+      postId: "post-queue-1",
+      channelId: "channel-123",
+      teamId: "team-123",
+      userId: "user-123",
+      userName: "alice",
+    },
+    {
+      dispatched: false,
+      reason: "duplicate_post",
+      postId: "post-queue-2",
+      channelId: "channel-123",
+      teamId: "team-123",
+      userId: "user-123",
+      userName: "alice",
+    },
     {
       dispatched: false,
       reason: "dispatch_queue_full",
@@ -1600,7 +1684,10 @@ test("kChat WebSocket dispatch queue bounds concurrent post handling", async () 
       userName: "alice",
     },
   ]);
+  assert.match(debugLogs.join("\n"), /reason=duplicate_post/);
   assert.match(debugLogs.join("\n"), /reason=dispatch_queue_full/);
+  assert.equal(debugLogs.join("\n").includes("message body for post-queue-1"), false);
+  assert.equal(debugLogs.join("\n").includes("message body for post-queue-2"), false);
   assert.equal(debugLogs.join("\n").includes("message body for post-queue-3"), false);
 
   releaseFirstDispatch();
@@ -1609,7 +1696,7 @@ test("kChat WebSocket dispatch queue bounds concurrent post handling", async () 
   }
 
   assert.equal(inboundRuns.length, 2);
-  assert.deepEqual(dispatchResults.slice(1), [
+  assert.deepEqual(dispatchResults.slice(3), [
     {
       dispatched: true,
       inboundId: "post-queue-1",
@@ -1629,6 +1716,22 @@ test("kChat WebSocket dispatch queue bounds concurrent post handling", async () 
       userName: "alice",
     },
   ]);
+
+  socket.emitMessage(createPostedFrame("post-queue-3"));
+  for (let index = 0; inboundRuns.length < 3 && index < 8; index += 1) {
+    await waitImmediate();
+  }
+
+  assert.equal(inboundRuns.length, 3);
+  assert.deepEqual(dispatchResults.at(-1), {
+    dispatched: true,
+    inboundId: "post-queue-3",
+    postId: "post-queue-3",
+    channelId: "channel-123",
+    teamId: "team-123",
+    userId: "user-123",
+    userName: "alice",
+  });
 
   abortController.abort();
   await connection;
