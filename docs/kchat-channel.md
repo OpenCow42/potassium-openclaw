@@ -102,8 +102,8 @@ and optional status updates.
 - `websocketTeamUserId`: optional kChat team user ID override for Echo
   subscriptions.
 - `websocketChannelScope`: `selected` or `all`. Defaults to `selected`, which
-  requires `websocketChannelIds`. Use `all` only when the install deliberately
-  accepts every visible channel.
+  requires `websocketChannelIds`. The only way to accept every visible channel
+  is to set `websocketChannelScope: "all"` deliberately.
 - `websocketChannelIds`: channel IDs accepted when the WebSocket scope is
   `selected`.
 - `websocketDedupeWindowMs`: milliseconds to suppress duplicate WebSocket posts
@@ -177,7 +177,8 @@ Use:
 ```
 
 only when the install deliberately accepts posts from every visible kChat
-channel.
+channel. Omitting `websocketChannelIds` does not request all-channel intake;
+all-channel intake requires `websocketChannelScope: "all"`.
 
 For a plain Mattermost server, set `websocketProtocol: "mattermost"` and
 optionally `websocketUrl`.

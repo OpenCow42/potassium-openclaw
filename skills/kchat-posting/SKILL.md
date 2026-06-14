@@ -36,7 +36,7 @@ Useful `channels.kchat` config:
 - `setOnlineOnReplyStart`: set the authenticated kChat user online once when an inbound reply starts. If omitted, it inherits `setOnline === true`.
 - `receiveMode`: inbound receive mode. Use `websocket` for hosted kChat back-and-forth without a public callback URL, `webhook` for kChat outgoing webhooks, `both` during migrations, or `disabled` for outbound-only use.
 - `websocketProtocol`: use `infomaniak-echo` for hosted Infomaniak kChat. Use `mattermost` only for a plain Mattermost server.
-- `websocketChannelScope`: WebSocket intake scope. Defaults to `selected`, which requires `websocketChannelIds`. Use `all` only when the install deliberately accepts every visible channel.
+- `websocketChannelScope`: WebSocket intake scope. Defaults to `selected`, which requires `websocketChannelIds`. The only way to accept every visible channel is to set `websocketChannelScope: "all"` deliberately.
 - `websocketChannelIds`: channel ids accepted from the WebSocket stream when `websocketChannelScope` is `selected`.
 - `websocketDedupeWindowMs`: milliseconds to suppress duplicate WebSocket posts by post id. Defaults to `120000`; set `0` to disable duplicate suppression.
 - `websocketDedupeMaxEntries`: maximum number of post ids retained in the WebSocket duplicate suppression cache. Defaults to `10000`.
@@ -74,7 +74,7 @@ channels: {
 }
 ```
 
-In WebSocket mode, OpenClaw does not need a public webhook server for inbound kChat messages. Keep `INFOMANIAK_TOKEN` available to the OpenClaw process; Potassium connects to Infomaniak's Echo/Pusher-compatible socket, resolves the team and current-user ids from `teamName`, authenticates the private and presence subscriptions, and dispatches live `posted` events into the `kchat` channel runtime. To listen globally, set `websocketChannelScope: "all"` deliberately.
+In WebSocket mode, OpenClaw does not need a public webhook server for inbound kChat messages. Keep `INFOMANIAK_TOKEN` available to the OpenClaw process; Potassium connects to Infomaniak's Echo/Pusher-compatible socket, resolves the team and current-user ids from `teamName`, authenticates the private and presence subscriptions, and dispatches live `posted` events into the `kchat` channel runtime. To listen globally, set `websocketChannelScope: "all"` deliberately; omitting `websocketChannelIds` alone fails closed.
 
 WebSocket dispatch into OpenClaw is bounded. If more post events arrive than `websocketDispatchConcurrency` plus `websocketDispatchQueueSize` can handle, the newest events are dropped with `dispatch_queue_full` diagnostics rather than starting unbounded concurrent reply work.
 

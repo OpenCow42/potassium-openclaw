@@ -122,7 +122,7 @@ export const PotassiumKchatChannelConfigJsonSchema = {
       enum: ["all", "selected"],
       default: DEFAULT_KCHAT_WEBSOCKET_CHANNEL_SCOPE,
       description:
-        'WebSocket inbound channel scope. Defaults to selected, which requires websocketChannelIds. Use all only to accept every visible channel deliberately.',
+        'WebSocket inbound channel scope. Defaults to selected, which requires websocketChannelIds. To accept every visible channel, set websocketChannelScope: "all" deliberately.',
     },
     websocketUrl: {
       type: "string",
