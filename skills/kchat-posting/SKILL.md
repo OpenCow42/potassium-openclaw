@@ -30,7 +30,7 @@ Useful `channels.kchat` config:
 
 - `teamName`: default team name for resolving channel names.
 - `apiBaseUrl`: optional team-specific API base URL. When omitted, the channel derives `https://<teamName>.kchat.infomaniak.com` from a DNS-safe `teamName`.
-- `defaultChannel`: default destination for outbound posts.
+- `defaultChannel`: default destination for outbound-initiated posts. Inbound kChat replies ignore this value and route from the inbound event.
 - `setOnline`: optional outbound `set_online` value.
 - `receiveMode`: inbound receive mode. Use `websocket` for hosted kChat back-and-forth without a public callback URL, `webhook` for kChat outgoing webhooks, `both` during migrations, or `disabled` for outbound-only use.
 - `websocketProtocol`: use `infomaniak-echo` for hosted Infomaniak kChat. Use `mattermost` only for a plain Mattermost server.
@@ -43,6 +43,8 @@ Useful `channels.kchat` config:
 - `ignoredUserIds` and `ignoredUserNames`: inbound senders to drop, usually the posting account.
 
 Outbound destinations may be `id:<channel_id>`, `#channel`, `channel`, or `team/channel`. Replies in threads should preserve the thread or root post id as the kChat `root_id`.
+
+Inbound kChat events are the routing authority for assistant replies. If the event has `channel_id`, reply to `id:<channel_id>` even when `defaultChannel` is configured. If the event has `root_id`, keep replies in that thread. If the event is a root post with `post_id` and no `root_id`, reply under that original post as the thread root. Do not fall back to `defaultChannel` for inbound events missing `channel_id`; treat them as missing reply context.
 
 For hosted Infomaniak kChat inbound setup, prefer WebSocket mode when the OpenClaw process can keep a long-lived connection:
 

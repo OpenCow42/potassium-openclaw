@@ -56,7 +56,7 @@ Supported kChat channel config:
 
 - `teamName`: default kChat team name for resolving channel names.
 - `apiBaseUrl`: optional team-specific kChat API base URL. When omitted, Potassium derives `https://<teamName>.kchat.infomaniak.com` from a DNS-safe `teamName`.
-- `defaultChannel`: default outbound destination.
+- `defaultChannel`: default destination for outbound-initiated posts. Inbound kChat replies ignore this value and route from the inbound event.
 - `setOnline`: optional `set_online` value sent with outbound posts.
 - `receiveMode`: inbound receive mode, one of `webhook`, `websocket`, `both`, or `disabled`. Defaults to `webhook`.
 - `websocketProtocol`: `infomaniak-echo` for hosted kChat, or `mattermost` for a plain Mattermost `/api/v4/websocket` server. Defaults to `infomaniak-echo`.
@@ -76,6 +76,8 @@ Supported kChat channel config:
 - `websocketDedupeWindowMs`: milliseconds to suppress duplicate WebSocket posts by post id. Defaults to `120000`; set `0` to disable duplicate suppression.
 
 Outbound destinations support `id:<channel_id>`, `#channel`, `channel`, and `team/channel`. Thread replies use the root post or reply id as the kChat thread root id.
+
+Inbound kChat events are the routing authority for replies. When an inbound event includes `channel_id`, OpenClaw replies are sent back to `id:<channel_id>` even if `defaultChannel` is configured. If the event includes `root_id`, replies stay in that existing thread. If the event is a root post with `post_id` and no `root_id`, replies are threaded under that original post. Events without `channel_id` are not allowed to fall back to `defaultChannel`; they are dropped or rejected as missing reply context.
 
 Inbound setup is intentionally environment-only for secrets. For webhook mode, create a kChat outgoing webhook in Infomaniak/kChat that points at the OpenClaw gateway URL plus `webhookPath`, set the webhook verification token in `INFOMANIAK_KCHAT_OUTGOING_WEBHOOK_TOKEN` or the configured env var, and add the posting account to `ignoredUserIds` or `ignoredUserNames` to avoid reply loops. kChat/Mattermost outgoing webhook payloads may arrive as JSON, form-urlencoded fields, or a form `payload` JSON value.
 
