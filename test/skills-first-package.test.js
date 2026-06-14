@@ -1674,6 +1674,38 @@ test("kChat WebSocket gateway refreshes env token between reconnect attempts", a
   assert.equal(MockWebSocket.instances[1].closed, true);
 });
 
+test("kChat WebSocket gateway redacts reconnect failure warnings", async () => {
+  const { startKchatWebSocketGatewayAccount } = await import(pathToFileURL(join(repositoryRoot, "index.js")).href);
+  const abortController = new AbortController();
+  const warnLogs = [];
+
+  class ThrowingWebSocket {
+    constructor() {
+      throw new Error("connect failed token=secret-token Bearer secret-token");
+    }
+  }
+
+  await startKchatWebSocketGatewayAccount({
+    cfg: { channels: { kchat: { teamName: "main-team", websocketProtocol: "mattermost" } } },
+    channelConfig: { teamName: "main-team", websocketProtocol: "mattermost", websocketReconnectInitialMs: 0 },
+    token: "placeholder-token",
+    WebSocketImpl: ThrowingWebSocket,
+    runtime: createKchatRuntimeStub({ inboundRuns: [] }),
+    abortSignal: abortController.signal,
+    log: {
+      warn(message) {
+        warnLogs.push(message);
+        abortController.abort();
+      },
+    },
+  });
+
+  assert.equal(warnLogs.length, 1);
+  assert.match(warnLogs[0], /token=\[redacted\]/);
+  assert.match(warnLogs[0], /Bearer \[redacted\]/);
+  assert.equal(warnLogs[0].includes("secret-token"), false);
+});
+
 test("kChat Infomaniak Echo WebSocket subscribes and dispatches posted events", async () => {
   const { runKchatWebSocketConnection } = await import(pathToFileURL(join(repositoryRoot, "index.js")).href);
   const inboundRuns = [];

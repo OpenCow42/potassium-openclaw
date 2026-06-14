@@ -927,12 +927,12 @@ export async function startKchatWebSocketGatewayAccount(options = {}) {
   }
 
   while (!options.abortSignal?.aborted) {
-    try {
-      const token = resolveKchatTokenFromOptions(options, channelConfig);
-      if (!token) {
-        throw new Error(`Set ${resolveKchatTokenEnvName(channelConfig)} in the environment before enabling kChat WebSocket receive mode.`);
-      }
+    const token = resolveKchatTokenFromOptions(options, channelConfig);
+    if (!token) {
+      throw new Error(`Set ${resolveKchatTokenEnvName(channelConfig)} in the environment before enabling kChat WebSocket receive mode.`);
+    }
 
+    try {
       await runKchatWebSocketConnection({
         ...options,
         channelConfig,
@@ -946,7 +946,7 @@ export async function startKchatWebSocketGatewayAccount(options = {}) {
         break;
       }
 
-      options.log?.warn?.(`kChat WebSocket connection ended: ${error instanceof Error ? error.message : String(error)}`);
+      options.log?.warn?.(`kChat WebSocket connection ended: ${formatKchatSafeError(error)}`);
     }
 
     if (!options.abortSignal?.aborted) {
