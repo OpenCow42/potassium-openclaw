@@ -137,6 +137,10 @@ test("runtime entry registers exactly the manifest tool contracts", async () => 
     replyTo: true,
     thread: true,
   });
+  assert.equal(kchatChannel.actions?.prepareSendPayload instanceof Function, true);
+  assert.equal(kchatChannel.threading?.buildToolContext instanceof Function, true);
+  assert.equal(kchatChannel.threading?.resolveAutoThreadId instanceof Function, true);
+  assert.equal(kchatChannel.messaging?.targetResolver?.resolveTarget instanceof Function, true);
   assert.equal(kchatChannel.outbound?.deliveryMode, "direct");
   assert.equal(kchatChannel.outbound?.sendText instanceof Function, true);
   assert.equal(kchatChannel.gateway?.startAccount instanceof Function, true);
@@ -260,6 +264,146 @@ test("kChat outbound resolves #channel destinations before creating posts", asyn
   assert.equal(result.messageId, "post-456");
   assert.equal(result.receipt.threadId, "thread-root");
   assert.equal(result.receipt.replyToId, "reply-ignored-when-thread-exists");
+});
+
+test("kChat message-tool sends inherit the current thread when #channel resolves to the same native channel", async () => {
+  const { createPotassiumKchatMessageAdapter, potassiumKchatChannelPlugin } = await import(
+    pathToFileURL(join(repositoryRoot, "index.js")).href
+  );
+  const tokenEnvName = "POTASSIUM_TEST_INFOMANIAK_TOKEN";
+  const originalToken = process.env[tokenEnvName];
+  const originalFetch = globalThis.fetch;
+  const targetRequests = [];
+  const sendCalls = [];
+
+  process.env[tokenEnvName] = "placeholder-token";
+  globalThis.fetch = async (url, init = {}) => {
+    targetRequests.push({
+      url: String(url),
+      method: init.method ?? "GET",
+    });
+    return jsonResponse({ id: "native-support-channel-id", name: "support" });
+  };
+
+  try {
+    const cfg = {
+      channels: {
+        kchat: {
+          teamName: "main-team",
+          tokenEnvName,
+        },
+      },
+    };
+    const toolContext = potassiumKchatChannelPlugin.threading.buildToolContext({
+      context: {
+        To: "id:native-support-channel-id",
+        NativeChannelId: "native-support-channel-id",
+        MessageThreadId: "root-post-123",
+        CurrentMessageId: "reply-post-456",
+      },
+      hasRepliedRef: { value: false },
+    });
+    const resolvedTarget = await potassiumKchatChannelPlugin.messaging.targetResolver.resolveTarget({
+      cfg,
+      input: "#support",
+      normalized: "#support",
+      preferredKind: "channel",
+    });
+    const inheritedThreadId = potassiumKchatChannelPlugin.threading.resolveAutoThreadId({
+      cfg,
+      to: resolvedTarget.to,
+      toolContext,
+    });
+    const adapter = createPotassiumKchatMessageAdapter({
+      client: {
+        kchat: {
+          async getchannelbynameforteamname(request) {
+            sendCalls.push(["lookup", request]);
+            throw new Error("resolved id: targets must not lookup channel names during send");
+          },
+          async createpost(request) {
+            sendCalls.push(["createpost", request]);
+            return { id: "reply-post-789", channel_id: "native-support-channel-id" };
+          },
+        },
+      },
+    });
+    const result = await adapter.send.text({
+      cfg,
+      to: resolvedTarget.to,
+      text: "agent reply",
+      threadId: inheritedThreadId,
+      replyToId: inheritedThreadId,
+    });
+
+    assert.deepEqual(toolContext, {
+      currentChannelId: "id:native-support-channel-id",
+      currentThreadTs: "root-post-123",
+      currentMessageId: "reply-post-456",
+      hasRepliedRef: { value: false },
+    });
+    assert.deepEqual(resolvedTarget, {
+      to: "id:native-support-channel-id",
+      kind: "channel",
+      display: "support",
+      source: "directory",
+    });
+    assert.equal(inheritedThreadId, "root-post-123");
+    assert.deepEqual(targetRequests, [
+      {
+        url: "https://main-team.kchat.infomaniak.com/api/v4/teams/name/main-team/channels/name/support",
+        method: "GET",
+      },
+    ]);
+    assert.deepEqual(sendCalls, [
+      [
+        "createpost",
+        {
+          body: {
+            channel_id: "native-support-channel-id",
+            message: "agent reply",
+            root_id: "root-post-123",
+          },
+        },
+      ],
+    ]);
+    assert.equal(result.messageId, "reply-post-789");
+    assert.equal(result.receipt.threadId, "root-post-123");
+    assert.equal(result.receipt.replyToId, "root-post-123");
+    assert.equal(
+      potassiumKchatChannelPlugin.actions.prepareSendPayload({
+        ctx: { params: { threadId: inheritedThreadId }, toolContext },
+        to: "id:native-support-channel-id",
+        payload: { text: "agent reply" },
+        threadId: inheritedThreadId,
+      }),
+      null,
+    );
+    assert.throws(
+      () =>
+        potassiumKchatChannelPlugin.actions.prepareSendPayload({
+          ctx: { params: {}, toolContext },
+          to: "id:native-support-channel-id",
+          payload: { text: "agent reply" },
+        }),
+      /bound to a kChat thread/,
+    );
+    assert.equal(
+      potassiumKchatChannelPlugin.actions.prepareSendPayload({
+        ctx: { params: { topLevel: true }, toolContext },
+        to: "id:native-support-channel-id",
+        payload: { text: "agent reply" },
+      }),
+      null,
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalToken === undefined) {
+      delete process.env[tokenEnvName];
+    } else {
+      process.env[tokenEnvName] = originalToken;
+    }
+  }
 });
 
 test("kChat outbound works with the published liquid-potassium client shape", async () => {

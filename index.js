@@ -299,6 +299,69 @@ export const potassiumKchatChannelPlugin = {
       },
     },
   }),
+  actions: {
+    prepareSendPayload({ ctx, to, threadId }) {
+      assertKchatThreadedMessageToolSend({
+        params: ctx.params,
+        to,
+        threadId,
+        toolContext: ctx.toolContext,
+      });
+      return null;
+    },
+  },
+  threading: {
+    buildToolContext({ context, hasRepliedRef }) {
+      const nativeChannelId = readOptionalString(context.NativeChannelId) ?? parseKchatChannelIdTarget(context.To);
+      const currentChannelId = nativeChannelId ? formatKchatChannelIdTarget(nativeChannelId) : readOptionalString(context.To);
+      const currentThreadTs =
+        readOptionalString(context.MessageThreadId == null ? undefined : String(context.MessageThreadId)) ??
+        readOptionalString(context.ReplyToId);
+
+      return {
+        ...(currentChannelId ? { currentChannelId } : {}),
+        ...(currentThreadTs ? { currentThreadTs } : {}),
+        ...(context.CurrentMessageId !== undefined ? { currentMessageId: context.CurrentMessageId } : {}),
+        hasRepliedRef,
+      };
+    },
+    resolveAutoThreadId({ to, toolContext }) {
+      const currentThreadTs = readOptionalString(toolContext?.currentThreadTs);
+      if (!currentThreadTs || !targetsResolveToSameKchatChannel(to, toolContext?.currentChannelId)) {
+        return undefined;
+      }
+
+      return currentThreadTs;
+    },
+    resolveCurrentChannelId({ to }) {
+      const channelId = parseKchatChannelIdTarget(to);
+      return channelId ? formatKchatChannelIdTarget(channelId) : readOptionalString(to);
+    },
+  },
+  messaging: {
+    targetResolver: {
+      hint: "Use id:<channel_id>, #channel, channel, or team/channel for kChat channel targets.",
+      looksLikeId(raw, normalized) {
+        return Boolean(parseKchatChannelIdTarget(raw) ?? parseKchatChannelIdTarget(normalized) ?? normalizeKchatChannelName(raw));
+      },
+      resolveTarget: resolveKchatMessagingTarget,
+    },
+    normalizeTarget(raw) {
+      const channelId = parseKchatChannelIdTarget(raw);
+      return channelId ? formatKchatChannelIdTarget(channelId) : readOptionalString(raw);
+    },
+    inferTargetChatType() {
+      return "channel";
+    },
+    formatTargetDisplay({ target, display }) {
+      if (display) {
+        return display.startsWith("#") ? display : `#${display}`;
+      }
+
+      const channelId = parseKchatChannelIdTarget(target);
+      return channelId ? `#${channelId}` : target;
+    },
+  },
   message: potassiumKchatMessageAdapter,
   outbound: {
     deliveryMode: "direct",
@@ -312,7 +375,7 @@ export const potassiumKchatChannelPlugin = {
     resolveTarget({ cfg, to }) {
       try {
         const destination = resolveKchatDestinationTarget({ cfg, to });
-        return { ok: true, to: destination };
+        return { ok: true, to: normalizeKchatOutboundTarget(destination) };
       } catch (error) {
         return { ok: false, error };
       }
@@ -1291,6 +1354,68 @@ function resolveKchatDestinationTarget({ cfg, to }) {
   return target;
 }
 
+function assertKchatThreadedMessageToolSend({ params, to, threadId, toolContext }) {
+  const currentThreadTs = readOptionalString(toolContext?.currentThreadTs);
+  if (!currentThreadTs || readOptionalString(threadId == null ? undefined : String(threadId))) {
+    return;
+  }
+
+  if (params?.topLevel === true || !targetsResolveToSameKchatChannel(to, toolContext?.currentChannelId)) {
+    return;
+  }
+
+  throw new Error("This session is bound to a kChat thread; include threadId or set topLevel:true for a top-level kChat post.");
+}
+
+async function resolveKchatMessagingTarget({ cfg, input, normalized, preferredKind }) {
+  if (preferredKind === "user") {
+    return null;
+  }
+
+  const target = readOptionalString(normalized) ?? readOptionalString(input);
+  if (!target) {
+    return null;
+  }
+
+  const idTarget = parseKchatChannelIdTarget(target);
+  if (idTarget) {
+    return {
+      to: formatKchatChannelIdTarget(idTarget),
+      kind: "channel",
+      display: idTarget,
+      source: "normalized",
+    };
+  }
+
+  const channelConfig = resolveKchatChannelConfig(cfg);
+  const namedDestination = parseKchatNamedDestination(target, channelConfig);
+  if (!namedDestination.teamName) {
+    throw new Error(
+      "kChat teamName is required to resolve channel names. Configure channels.kchat.teamName or use team/channel.",
+    );
+  }
+
+  const client = resolveKchatClient({ channelConfig });
+  const channel = await resolveKchatOperations(client).getchannelbynameforteamname({
+    path: {
+      team_name: namedDestination.teamName,
+      channel_name: namedDestination.channelName,
+    },
+  });
+  const channelId = resolveProviderChannelId(channel);
+
+  if (!channelId) {
+    throw new Error(`kChat channel lookup did not return an id for ${namedDestination.teamName}/${namedDestination.channelName}.`);
+  }
+
+  return {
+    to: formatKchatChannelIdTarget(channelId),
+    kind: "channel",
+    display: namedDestination.channelName,
+    source: "directory",
+  };
+}
+
 async function resolveKchatDestination({ cfg, to, client, createClient, fetch, signal, token }) {
   const channelConfig = resolveKchatChannelConfig(cfg);
   const rawDestination = resolveKchatDestinationTarget({ cfg, to });
@@ -1334,19 +1459,43 @@ async function resolveKchatDestination({ cfg, to, client, createClient, fetch, s
 }
 
 function parseKchatChannelIdDestination(destination) {
-  if (!destination.startsWith("id:")) {
-    return undefined;
-  }
-
-  const channelId = readOptionalString(destination.slice("id:".length));
+  const channelId = parseKchatChannelIdTarget(destination);
   if (!channelId) {
-    throw new Error("kChat id: destination must include a channel_id.");
+    if (readOptionalString(destination)?.toLowerCase().startsWith("id:")) {
+      throw new Error("kChat id: destination must include a channel_id.");
+    }
+
+    return undefined;
   }
 
   return {
     channelId,
-    conversationId: `id:${channelId}`,
+    conversationId: formatKchatChannelIdTarget(channelId),
   };
+}
+
+function parseKchatChannelIdTarget(value) {
+  const target = readOptionalString(value);
+  if (!target || !target.toLowerCase().startsWith("id:")) {
+    return undefined;
+  }
+
+  return readOptionalString(target.slice("id:".length));
+}
+
+function formatKchatChannelIdTarget(channelId) {
+  return `id:${channelId}`;
+}
+
+function normalizeKchatOutboundTarget(target) {
+  const channelId = parseKchatChannelIdTarget(target);
+  return channelId ? formatKchatChannelIdTarget(channelId) : target;
+}
+
+function targetsResolveToSameKchatChannel(left, right) {
+  const leftChannelId = parseKchatChannelIdTarget(left);
+  const rightChannelId = parseKchatChannelIdTarget(right);
+  return Boolean(leftChannelId && rightChannelId && leftChannelId === rightChannelId);
 }
 
 function parseKchatNamedDestination(destination, channelConfig) {
