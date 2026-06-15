@@ -44,7 +44,7 @@ test("package declares a native OpenClaw plugin backed by the published liquid-p
   const codexManifest = JSON.parse(await readFile(join(repositoryRoot, ".codex-plugin", "plugin.json"), "utf8"));
 
   assert.equal(packageJson.private, undefined, "public bundle must not be marked private");
-  assert.equal(packageJson.version, "0.3.0");
+  assert.equal(packageJson.version, "0.4.0");
   assert.equal(packageLock.version, packageJson.version);
   assert.equal(packageLock.packages?.[""]?.version, packageJson.version);
   assert.equal(packageJson.license, "Apache-2.0");
@@ -63,6 +63,7 @@ test("package declares a native OpenClaw plugin backed by the published liquid-p
   assert.equal(packageJson.peerDependencies?.openclaw, ">=2026.6.6");
 
   assert.equal(nativeManifest.id, "potassium");
+  assert.equal(nativeManifest.version, packageJson.version);
   assert.equal(nativeManifest.name, "Potassium");
   assert.deepEqual(nativeManifest.skills, ["./skills"]);
   assert.deepEqual(nativeManifest.channels, expectedChannelIds);
@@ -809,8 +810,8 @@ test("kChat inbound root posts reply in a thread under the original post", async
   });
 
   await dispatchKchatInboundWebhookEvent({
-    cfg: { channels: { kchat: { defaultChannel: "id:wrong-default-channel" } } },
-    channelConfig: { defaultChannel: "id:wrong-default-channel" },
+    cfg: { channels: { kchat: { defaultChannel: "id:wrong-default-channel", responseMode: "all" } } },
+    channelConfig: { defaultChannel: "id:wrong-default-channel", responseMode: "all" },
     runtime: createKchatRuntimeStub({ inboundRuns, routeCalls, realContext: true }),
     inbound,
   });
@@ -864,8 +865,8 @@ test("kChat inbound replies publish typing and can set the user online", async (
   });
 
   await dispatchKchatInboundWebhookEvent({
-    cfg: { channels: { kchat: { setOnlineOnReplyStart: true } } },
-    channelConfig: { setOnlineOnReplyStart: true },
+    cfg: { channels: { kchat: { setOnlineOnReplyStart: true, responseMode: "all" } } },
+    channelConfig: { setOnlineOnReplyStart: true, responseMode: "all" },
     runtime: createKchatRuntimeStub({ inboundRuns, realContext: true }),
     inbound,
     client,
@@ -951,8 +952,8 @@ test("kChat inbound typing can be disabled independently of online config", asyn
   });
 
   await dispatchKchatInboundWebhookEvent({
-    cfg: { channels: { kchat: { typingIndicator: false, setOnlineOnReplyStart: true } } },
-    channelConfig: { typingIndicator: false, setOnlineOnReplyStart: true },
+    cfg: { channels: { kchat: { typingIndicator: false, setOnlineOnReplyStart: true, responseMode: "all" } } },
+    channelConfig: { typingIndicator: false, setOnlineOnReplyStart: true, responseMode: "all" },
     runtime: createKchatRuntimeStub({ inboundRuns, realContext: true }),
     inbound,
     client,
@@ -998,8 +999,8 @@ test("kChat typing and status errors do not block final reply delivery", async (
   });
 
   await dispatchKchatInboundWebhookEvent({
-    cfg: { channels: { kchat: { setOnlineOnReplyStart: true } } },
-    channelConfig: { setOnlineOnReplyStart: true },
+    cfg: { channels: { kchat: { setOnlineOnReplyStart: true, responseMode: "all" } } },
+    channelConfig: { setOnlineOnReplyStart: true, responseMode: "all" },
     runtime: createKchatRuntimeStub({ inboundRuns, realContext: true }),
     inbound,
     client,
@@ -1043,8 +1044,8 @@ test("kChat inbound channel_id overrides configured defaultChannel for replies",
   });
 
   await dispatchKchatInboundWebhookEvent({
-    cfg: { channels: { kchat: { defaultChannel: "id:configured-default-channel" } } },
-    channelConfig: { defaultChannel: "id:configured-default-channel" },
+    cfg: { channels: { kchat: { defaultChannel: "id:configured-default-channel", responseMode: "all" } } },
+    channelConfig: { defaultChannel: "id:configured-default-channel", responseMode: "all" },
     runtime: createKchatRuntimeStub({ inboundRuns, realContext: true }),
     inbound,
   });
@@ -1076,8 +1077,8 @@ test("kChat inbound without channel_id fails safely instead of using defaultChan
   });
 
   await dispatchKchatInboundWebhookEvent({
-    cfg: { channels: { kchat: { defaultChannel: "id:configured-default-channel" } } },
-    channelConfig: { defaultChannel: "id:configured-default-channel", teamName: "main" },
+    cfg: { channels: { kchat: { defaultChannel: "id:configured-default-channel", responseMode: "all" } } },
+    channelConfig: { defaultChannel: "id:configured-default-channel", teamName: "main", responseMode: "all" },
     runtime: createKchatRuntimeStub({ inboundRuns, routeCalls }),
     inbound,
   });
@@ -1096,8 +1097,8 @@ test("kChat inbound without channel_id fails safely instead of using defaultChan
     params.adapter.resolveTurn(params.adapter.ingest());
   };
   const handler = createPotassiumKchatWebhookHandler({
-    cfg: { channels: { kchat: { defaultChannel: "id:configured-default-channel" } } },
-    channelConfig: { defaultChannel: "id:configured-default-channel", teamName: "main" },
+    cfg: { channels: { kchat: { defaultChannel: "id:configured-default-channel", responseMode: "all" } } },
+    channelConfig: { defaultChannel: "id:configured-default-channel", teamName: "main", responseMode: "all" },
     env: { INFOMANIAK_KCHAT_OUTGOING_WEBHOOK_TOKEN: "expected-placeholder" },
     runtime: handlerRuntime,
   });
@@ -1149,8 +1150,8 @@ test("kChat inbound webhook rejects invalid tokens without dispatching", async (
   const { createPotassiumKchatWebhookHandler } = await import(pathToFileURL(join(repositoryRoot, "index.js")).href);
   const calls = [];
   const handler = createPotassiumKchatWebhookHandler({
-    cfg: { channels: { kchat: { enabled: true } } },
-    channelConfig: {},
+    cfg: { channels: { kchat: { enabled: true, responseMode: "all" } } },
+    channelConfig: { responseMode: "all" },
     env: { INFOMANIAK_KCHAT_OUTGOING_WEBHOOK_TOKEN: "expected-placeholder" },
     runtime: {
       channel: {
@@ -1183,8 +1184,8 @@ test("kChat inbound webhook redacts dispatch failure logs", async () => {
   const { createPotassiumKchatWebhookHandler } = await import(pathToFileURL(join(repositoryRoot, "index.js")).href);
   const errors = [];
   const handler = createPotassiumKchatWebhookHandler({
-    cfg: { channels: { kchat: { enabled: true } } },
-    channelConfig: {},
+    cfg: { channels: { kchat: { enabled: true, responseMode: "all" } } },
+    channelConfig: { responseMode: "all" },
     env: { INFOMANIAK_KCHAT_OUTGOING_WEBHOOK_TOKEN: "expected-placeholder" },
     runtime: {
       channel: {
@@ -1256,14 +1257,209 @@ test("kChat inbound webhook drops ignored users without dispatching", async () =
   assert.equal(calls.length, 0);
 });
 
+test("kChat inbound webhook response gate handles addressed and unaddressed messages", async () => {
+  const { createPotassiumKchatWebhookHandler } = await import(pathToFileURL(join(repositoryRoot, "index.js")).href);
+  const currentUserClient = {
+    kchat: {
+      async getuser() {
+        return { id: "bot-user", username: "Potassium.Bot", name: "Potassium Bot" };
+      },
+    },
+  };
+  const createHandler = ({ channelConfig = {}, inboundRuns, client = currentUserClient }) =>
+    createPotassiumKchatWebhookHandler({
+      cfg: { channels: { kchat: channelConfig } },
+      channelConfig,
+      env: { INFOMANIAK_KCHAT_OUTGOING_WEBHOOK_TOKEN: "expected-placeholder" },
+      runtime: createKchatRuntimeStub({ inboundRuns }),
+      client,
+    });
+  const createBody = (payload) =>
+    JSON.stringify({
+      token: "expected-placeholder",
+      channel_id: "channel-123",
+      post_id: payload.post_id ?? "post-123",
+      user_id: "user-123",
+      user_name: "alice",
+      text: "general channel chatter",
+      ...payload,
+    });
+
+  const notAddressedRuns = [];
+  const notAddressedResponse = await invokeWebhookHandler(createHandler({ inboundRuns: notAddressedRuns }), {
+    contentType: "application/json",
+    body: createBody({ post_id: "post-not-addressed" }),
+  });
+  assert.equal(notAddressedResponse.statusCode, 200);
+  assert.deepEqual(JSON.parse(notAddressedResponse.body), { ok: true, status: "dropped" });
+  assert.equal(notAddressedRuns.length, 0);
+
+  const mentionRuns = [];
+  const mentionText = "hey @SupportBot please keep this exact text";
+  const mentionResponse = await invokeWebhookHandler(
+    createHandler({ channelConfig: { mentionAliases: ["SupportBot"] }, inboundRuns: mentionRuns }),
+    {
+      contentType: "application/json",
+      body: createBody({ post_id: "post-mentioned", text: mentionText }),
+    },
+  );
+  assert.equal(mentionResponse.statusCode, 200);
+  assert.deepEqual(JSON.parse(mentionResponse.body), { ok: true, status: "dispatched" });
+  assert.equal(mentionRuns.length, 1);
+  assert.equal(mentionRuns[0].adapter.ingest().rawText, mentionText);
+
+  const threadRuns = [];
+  const threadResponse = await invokeWebhookHandler(createHandler({ inboundRuns: threadRuns }), {
+    contentType: "application/json",
+    body: createBody({ post_id: "post-thread", root_id: "root-thread", text: "thread continuation" }),
+  });
+  assert.equal(threadResponse.statusCode, 200);
+  assert.deepEqual(JSON.parse(threadResponse.body), { ok: true, status: "dispatched" });
+  assert.equal(threadRuns.length, 1);
+
+  const directRuns = [];
+  const directResponse = await invokeWebhookHandler(createHandler({ inboundRuns: directRuns }), {
+    contentType: "application/json",
+    body: createBody({ post_id: "post-direct", channel_type: "D", text: "direct message" }),
+  });
+  assert.equal(directResponse.statusCode, 200);
+  assert.deepEqual(JSON.parse(directResponse.body), { ok: true, status: "dispatched" });
+  assert.equal(directRuns.length, 1);
+
+  const allRuns = [];
+  const allResponse = await invokeWebhookHandler(
+    createHandler({ channelConfig: { responseMode: "all" }, inboundRuns: allRuns, client: undefined }),
+    {
+      contentType: "application/json",
+      body: createBody({ post_id: "post-all", text: "ambient root post" }),
+    },
+  );
+  assert.equal(allResponse.statusCode, 200);
+  assert.deepEqual(JSON.parse(allResponse.body), { ok: true, status: "dispatched" });
+  assert.equal(allRuns.length, 1);
+});
+
+test("kChat inbound webhook response gate caches identity per handler", async () => {
+  const { createPotassiumKchatWebhookHandler } = await import(pathToFileURL(join(repositoryRoot, "index.js")).href);
+  const inboundRuns = [];
+  let getUserCalls = 0;
+  const handler = createPotassiumKchatWebhookHandler({
+    cfg: { channels: { kchat: {} } },
+    channelConfig: {},
+    env: { INFOMANIAK_KCHAT_OUTGOING_WEBHOOK_TOKEN: "expected-placeholder" },
+    runtime: createKchatRuntimeStub({ inboundRuns }),
+    client: {
+      kchat: {
+        async getuser() {
+          getUserCalls += 1;
+          return { id: "bot-user", username: "Potassium.Bot", name: "Potassium Bot" };
+        },
+      },
+    },
+  });
+  const createBody = (postId) =>
+    JSON.stringify({
+      token: "expected-placeholder",
+      channel_id: "channel-123",
+      post_id: postId,
+      user_id: "user-123",
+      user_name: "alice",
+      text: "general channel chatter",
+    });
+
+  for (const postId of ["post-cache-1", "post-cache-2"]) {
+    const response = await invokeWebhookHandler(handler, {
+      contentType: "application/json",
+      body: createBody(postId),
+    });
+    assert.equal(response.statusCode, 200);
+    assert.deepEqual(JSON.parse(response.body), { ok: true, status: "dropped" });
+  }
+
+  assert.equal(inboundRuns.length, 0);
+  assert.equal(getUserCalls, 1);
+});
+
+test("kChat inbound webhook response gate drops self messages and fails closed without identity", async () => {
+  const { createPotassiumKchatWebhookHandler, dispatchKchatInboundWebhookEvent, normalizeKchatOutgoingWebhookPayload } =
+    await import(pathToFileURL(join(repositoryRoot, "index.js")).href);
+  const currentUserClient = {
+    kchat: {
+      async getuser() {
+        return { id: "bot-user", username: "Potassium.Bot", name: "Potassium Bot" };
+      },
+    },
+  };
+  const selfResult = await dispatchKchatInboundWebhookEvent({
+    channelConfig: {},
+    runtime: createKchatRuntimeStub({ inboundRuns: [] }),
+    client: currentUserClient,
+    inbound: normalizeKchatOutgoingWebhookPayload({
+      channel_id: "channel-123",
+      post_id: "post-self",
+      user_id: "bot-user",
+      user_name: "Potassium.Bot",
+      text: "@Potassium.Bot loop candidate",
+    }),
+  });
+  assert.deepEqual(selfResult, {
+    dispatched: false,
+    reason: "self_message",
+    channelId: "channel-123",
+    userId: "bot-user",
+    userName: "Potassium.Bot",
+  });
+
+  const identityFailureRuns = [];
+  const warnings = [];
+  const failingIdentityClient = {
+    kchat: {
+      async getuser() {
+        throw new Error("identity lookup failed token=secret-token");
+      },
+    },
+  };
+  const handler = createPotassiumKchatWebhookHandler({
+    cfg: { channels: { kchat: {} } },
+    channelConfig: {},
+    env: { INFOMANIAK_KCHAT_OUTGOING_WEBHOOK_TOKEN: "expected-placeholder" },
+    runtime: createKchatRuntimeStub({ inboundRuns: identityFailureRuns }),
+    client: failingIdentityClient,
+    log: {
+      warn(message) {
+        warnings.push(message);
+      },
+    },
+  });
+  const response = await invokeWebhookHandler(handler, {
+    contentType: "application/json",
+    body: JSON.stringify({
+      token: "expected-placeholder",
+      channel_id: "channel-123",
+      post_id: "post-identity-failure",
+      user_id: "user-123",
+      user_name: "alice",
+      text: "@Potassium.Bot please respond",
+    }),
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(JSON.parse(response.body), { ok: true, status: "dropped" });
+  assert.equal(identityFailureRuns.length, 0);
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /token=\[redacted\]/);
+  assert.equal(warnings[0].includes("secret-token"), false);
+  assert.equal(warnings[0].includes("@Potassium.Bot please respond"), false);
+});
+
 test("kChat inbound webhook parses form and payload-wrapped bodies", async () => {
   const { createPotassiumKchatWebhookHandler, parseKchatWebhookBody } = await import(
     pathToFileURL(join(repositoryRoot, "index.js")).href
   );
   const calls = [];
   const handler = createPotassiumKchatWebhookHandler({
-    cfg: { channels: { kchat: { enabled: true } } },
-    channelConfig: {},
+    cfg: { channels: { kchat: { enabled: true, responseMode: "all" } } },
+    channelConfig: { responseMode: "all" },
     env: { INFOMANIAK_KCHAT_OUTGOING_WEBHOOK_TOKEN: "expected-placeholder" },
     runtime: {
       channel: {
@@ -1517,8 +1713,12 @@ test("kChat WebSocket helpers derive URLs and normalize posted events", async ()
 
   assert.deepEqual(
     await dispatchKchatWebSocketEvent({
-      cfg: { channels: { kchat: { teamName: "main-team", websocketChannelScope: "all", websocketChannelIds: ["other-channel"] } } },
-      channelConfig: { teamName: "main-team", websocketChannelScope: "all", websocketChannelIds: ["other-channel"] },
+      cfg: {
+        channels: {
+          kchat: { teamName: "main-team", websocketChannelScope: "all", websocketChannelIds: ["other-channel"], responseMode: "all" },
+        },
+      },
+      channelConfig: { teamName: "main-team", websocketChannelScope: "all", websocketChannelIds: ["other-channel"], responseMode: "all" },
       runtime: createKchatRuntimeStub({ inboundRuns }),
       frame,
     }),
@@ -1536,8 +1736,12 @@ test("kChat WebSocket helpers derive URLs and normalize posted events", async ()
 
   assert.deepEqual(
     await dispatchKchatWebSocketEvent({
-      cfg: { channels: { kchat: { teamName: "main-team", websocketChannelScope: "all", ignoredUserIds: ["user-123"] } } },
-      channelConfig: { teamName: "main-team", websocketChannelScope: "all", ignoredUserIds: ["user-123"] },
+      cfg: {
+        channels: {
+          kchat: { teamName: "main-team", websocketChannelScope: "all", ignoredUserIds: ["user-123"], responseMode: "all" },
+        },
+      },
+      channelConfig: { teamName: "main-team", websocketChannelScope: "all", ignoredUserIds: ["user-123"], responseMode: "all" },
       runtime: createKchatRuntimeStub({ inboundRuns }),
       frame,
     }),
@@ -1572,8 +1776,22 @@ test("kChat WebSocket helpers derive URLs and normalize posted events", async ()
   };
   assert.deepEqual(
     await dispatchKchatWebSocketEvent({
-      cfg: { channels: { kchat: { teamName: "main-team", websocketChannelScope: "all", defaultChannel: "id:configured-default-channel" } } },
-      channelConfig: { teamName: "main-team", websocketChannelScope: "all", defaultChannel: "id:configured-default-channel" },
+      cfg: {
+        channels: {
+          kchat: {
+            teamName: "main-team",
+            websocketChannelScope: "all",
+            defaultChannel: "id:configured-default-channel",
+            responseMode: "all",
+          },
+        },
+      },
+      channelConfig: {
+        teamName: "main-team",
+        websocketChannelScope: "all",
+        defaultChannel: "id:configured-default-channel",
+        responseMode: "all",
+      },
       runtime: createKchatRuntimeStub({ inboundRuns }),
       frame: missingChannelFrame,
     }),
@@ -1593,8 +1811,8 @@ test("kChat WebSocket helpers derive URLs and normalize posted events", async ()
   assert.equal(
     (
       await dispatchKchatWebSocketEvent({
-        cfg: { channels: { kchat: { teamName: "main-team", websocketChannelScope: "all" } } },
-        channelConfig: { teamName: "main-team", websocketChannelScope: "all" },
+        cfg: { channels: { kchat: { teamName: "main-team", websocketChannelScope: "all", responseMode: "all" } } },
+        channelConfig: { teamName: "main-team", websocketChannelScope: "all", responseMode: "all" },
         runtime: createKchatRuntimeStub({ inboundRuns: duplicateRuns }),
         frame,
         dedupeState,
@@ -1604,8 +1822,8 @@ test("kChat WebSocket helpers derive URLs and normalize posted events", async ()
   );
   assert.deepEqual(
     await dispatchKchatWebSocketEvent({
-      cfg: { channels: { kchat: { teamName: "main-team", websocketChannelScope: "all" } } },
-      channelConfig: { teamName: "main-team", websocketChannelScope: "all" },
+      cfg: { channels: { kchat: { teamName: "main-team", websocketChannelScope: "all", responseMode: "all" } } },
+      channelConfig: { teamName: "main-team", websocketChannelScope: "all", responseMode: "all" },
       runtime: createKchatRuntimeStub({ inboundRuns: duplicateRuns }),
       frame,
       dedupeState,
@@ -1627,8 +1845,12 @@ test("kChat WebSocket helpers derive URLs and normalize posted events", async ()
   assert.equal(
     (
       await dispatchKchatWebSocketEvent({
-        cfg: { channels: { kchat: { teamName: "main-team", websocketChannelScope: "all", websocketDedupeWindowMs: 0 } } },
-        channelConfig: { teamName: "main-team", websocketChannelScope: "all", websocketDedupeWindowMs: 0 },
+        cfg: {
+          channels: {
+            kchat: { teamName: "main-team", websocketChannelScope: "all", websocketDedupeWindowMs: 0, responseMode: "all" },
+          },
+        },
+        channelConfig: { teamName: "main-team", websocketChannelScope: "all", websocketDedupeWindowMs: 0, responseMode: "all" },
         runtime: createKchatRuntimeStub({ inboundRuns: noDedupeRuns }),
         frame,
         dedupeState: noDedupeState,
@@ -1639,8 +1861,12 @@ test("kChat WebSocket helpers derive URLs and normalize posted events", async ()
   assert.equal(
     (
       await dispatchKchatWebSocketEvent({
-        cfg: { channels: { kchat: { teamName: "main-team", websocketChannelScope: "all", websocketDedupeWindowMs: 0 } } },
-        channelConfig: { teamName: "main-team", websocketChannelScope: "all", websocketDedupeWindowMs: 0 },
+        cfg: {
+          channels: {
+            kchat: { teamName: "main-team", websocketChannelScope: "all", websocketDedupeWindowMs: 0, responseMode: "all" },
+          },
+        },
+        channelConfig: { teamName: "main-team", websocketChannelScope: "all", websocketDedupeWindowMs: 0, responseMode: "all" },
         runtime: createKchatRuntimeStub({ inboundRuns: noDedupeRuns }),
         frame,
         dedupeState: noDedupeState,
@@ -1655,8 +1881,12 @@ test("kChat WebSocket helpers derive URLs and normalize posted events", async ()
   assert.equal(
     (
       await dispatchKchatWebSocketEvent({
-        cfg: { channels: { kchat: { teamName: "main-team", websocketChannelScope: "all", websocketDedupeWindowMs: 1 } } },
-        channelConfig: { teamName: "main-team", websocketChannelScope: "all", websocketDedupeWindowMs: 1 },
+        cfg: {
+          channels: {
+            kchat: { teamName: "main-team", websocketChannelScope: "all", websocketDedupeWindowMs: 1, responseMode: "all" },
+          },
+        },
+        channelConfig: { teamName: "main-team", websocketChannelScope: "all", websocketDedupeWindowMs: 1, responseMode: "all" },
         runtime: createKchatRuntimeStub({ inboundRuns: expiredDedupeRuns }),
         frame,
         dedupeState: expiredDedupeState,
@@ -1674,8 +1904,12 @@ test("kChat WebSocket helpers derive URLs and normalize posted events", async ()
     assert.equal(
       (
         await dispatchKchatWebSocketEvent({
-          cfg: { channels: { kchat: { teamName: "main-team", websocketChannelScope: "all", websocketDedupeMaxEntries: 2 } } },
-          channelConfig: { teamName: "main-team", websocketChannelScope: "all", websocketDedupeMaxEntries: 2 },
+          cfg: {
+            channels: {
+              kchat: { teamName: "main-team", websocketChannelScope: "all", websocketDedupeMaxEntries: 2, responseMode: "all" },
+            },
+          },
+          channelConfig: { teamName: "main-team", websocketChannelScope: "all", websocketDedupeMaxEntries: 2, responseMode: "all" },
           runtime: createKchatRuntimeStub({ inboundRuns: cappedDedupeRuns }),
           frame: createFrame(postId),
           dedupeState: cappedDedupeState,
@@ -1688,8 +1922,12 @@ test("kChat WebSocket helpers derive URLs and normalize posted events", async ()
   assert.equal(
     (
       await dispatchKchatWebSocketEvent({
-        cfg: { channels: { kchat: { teamName: "main-team", websocketChannelScope: "all", websocketDedupeMaxEntries: 2 } } },
-        channelConfig: { teamName: "main-team", websocketChannelScope: "all", websocketDedupeMaxEntries: 2 },
+        cfg: {
+          channels: {
+            kchat: { teamName: "main-team", websocketChannelScope: "all", websocketDedupeMaxEntries: 2, responseMode: "all" },
+          },
+        },
+        channelConfig: { teamName: "main-team", websocketChannelScope: "all", websocketDedupeMaxEntries: 2, responseMode: "all" },
         runtime: createKchatRuntimeStub({ inboundRuns: cappedDedupeRuns }),
         frame: createFrame("post-cap-1"),
         dedupeState: cappedDedupeState,
@@ -1699,6 +1937,184 @@ test("kChat WebSocket helpers derive URLs and normalize posted events", async ()
   );
   assert.equal(cappedDedupeRuns.length, 4);
   assert.deepEqual([...cappedDedupeState.keys()], ["post-cap-3", "post-cap-1"]);
+});
+
+test("kChat WebSocket response gate handles addressed and unaddressed posts", async () => {
+  const { dispatchKchatWebSocketEvent } = await import(pathToFileURL(join(repositoryRoot, "index.js")).href);
+  const currentUserClient = {
+    kchat: {
+      async getuser() {
+        return { id: "bot-user", username: "Potassium.Bot", name: "Potassium Bot" };
+      },
+    },
+  };
+  const baseConfig = { teamName: "main-team", websocketChannelScope: "all" };
+  const createFrame = ({ postId, message, rootId, channelType, userId = "user-123", senderName = "alice" }) => ({
+    event: "posted",
+    data: {
+      channel_name: "test",
+      sender_name: senderName,
+      post: JSON.stringify({
+        id: postId,
+        channel_id: "channel-123",
+        user_id: userId,
+        message,
+        create_at: 1710000000000,
+        ...(rootId ? { root_id: rootId } : {}),
+        ...(channelType ? { channel_type: channelType } : {}),
+      }),
+    },
+    broadcast: {
+      team_id: "team-123",
+    },
+    seq: 2,
+  });
+
+  const notAddressedRuns = [];
+  assert.deepEqual(
+    await dispatchKchatWebSocketEvent({
+      cfg: { channels: { kchat: baseConfig } },
+      channelConfig: baseConfig,
+      runtime: createKchatRuntimeStub({ inboundRuns: notAddressedRuns }),
+      frame: createFrame({ postId: "post-ws-not-addressed", message: "general channel chatter" }),
+      client: currentUserClient,
+    }),
+    {
+      dispatched: false,
+      reason: "not_addressed",
+      postId: "post-ws-not-addressed",
+      channelId: "channel-123",
+      teamId: "team-123",
+      userId: "user-123",
+      userName: "alice",
+    },
+  );
+  assert.equal(notAddressedRuns.length, 0);
+
+  const mentionRuns = [];
+  const mentionText = "hey @SupportBot please keep this exact text";
+  assert.equal(
+    (
+      await dispatchKchatWebSocketEvent({
+        cfg: { channels: { kchat: { ...baseConfig, mentionAliases: ["SupportBot"] } } },
+        channelConfig: { ...baseConfig, mentionAliases: ["SupportBot"] },
+        runtime: createKchatRuntimeStub({ inboundRuns: mentionRuns }),
+        frame: createFrame({ postId: "post-ws-mentioned", message: mentionText }),
+        client: currentUserClient,
+      })
+    ).dispatched,
+    true,
+  );
+  assert.equal(mentionRuns.length, 1);
+  assert.equal(mentionRuns[0].adapter.ingest().rawText, mentionText);
+
+  const threadRuns = [];
+  assert.equal(
+    (
+      await dispatchKchatWebSocketEvent({
+        cfg: { channels: { kchat: baseConfig } },
+        channelConfig: baseConfig,
+        runtime: createKchatRuntimeStub({ inboundRuns: threadRuns }),
+        frame: createFrame({ postId: "post-ws-thread", rootId: "root-ws-thread", message: "thread continuation" }),
+        client: currentUserClient,
+      })
+    ).dispatched,
+    true,
+  );
+  assert.equal(threadRuns.length, 1);
+
+  const directRuns = [];
+  assert.equal(
+    (
+      await dispatchKchatWebSocketEvent({
+        cfg: { channels: { kchat: baseConfig } },
+        channelConfig: baseConfig,
+        runtime: createKchatRuntimeStub({ inboundRuns: directRuns }),
+        frame: createFrame({ postId: "post-ws-direct", channelType: "D", message: "direct message" }),
+        client: currentUserClient,
+      })
+    ).dispatched,
+    true,
+  );
+  assert.equal(directRuns.length, 1);
+
+  const selfRuns = [];
+  assert.deepEqual(
+    await dispatchKchatWebSocketEvent({
+      cfg: { channels: { kchat: baseConfig } },
+      channelConfig: baseConfig,
+      runtime: createKchatRuntimeStub({ inboundRuns: selfRuns }),
+      frame: createFrame({
+        postId: "post-ws-self",
+        channelType: "D",
+        userId: "bot-user",
+        senderName: "Potassium.Bot",
+        message: "@Potassium.Bot loop candidate",
+      }),
+      client: currentUserClient,
+    }),
+    {
+      dispatched: false,
+      reason: "self_message",
+      postId: "post-ws-self",
+      channelId: "channel-123",
+      teamId: "team-123",
+      userId: "bot-user",
+      userName: "Potassium.Bot",
+    },
+  );
+  assert.equal(selfRuns.length, 0);
+
+  const identityFailureRuns = [];
+  const warnings = [];
+  assert.deepEqual(
+    await dispatchKchatWebSocketEvent({
+      cfg: { channels: { kchat: baseConfig } },
+      channelConfig: baseConfig,
+      runtime: createKchatRuntimeStub({ inboundRuns: identityFailureRuns }),
+      frame: createFrame({ postId: "post-ws-identity-failure", message: "@Potassium.Bot please respond" }),
+      client: {
+        kchat: {
+          async getuser() {
+            throw new Error("identity lookup failed token=secret-token");
+          },
+        },
+      },
+      log: {
+        warn(message) {
+          warnings.push(message);
+        },
+      },
+    }),
+    {
+      dispatched: false,
+      reason: "not_addressed",
+      postId: "post-ws-identity-failure",
+      channelId: "channel-123",
+      teamId: "team-123",
+      userId: "user-123",
+      userName: "alice",
+    },
+  );
+  assert.equal(identityFailureRuns.length, 0);
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /token=\[redacted\]/);
+  assert.equal(warnings[0].includes("secret-token"), false);
+  assert.equal(warnings[0].includes("@Potassium.Bot please respond"), false);
+
+  const allRuns = [];
+  assert.equal(
+    (
+      await dispatchKchatWebSocketEvent({
+        cfg: { channels: { kchat: { ...baseConfig, responseMode: "all" } } },
+        channelConfig: { ...baseConfig, responseMode: "all" },
+        runtime: createKchatRuntimeStub({ inboundRuns: allRuns }),
+        frame: createFrame({ postId: "post-ws-all", message: "ambient root post" }),
+      })
+    ).dispatched,
+    true,
+  );
+  assert.equal(allRuns.length, 1);
 });
 
 test("kChat WebSocket inbound reply context preserves channel and thread roots", async () => {
@@ -1770,8 +2186,22 @@ test("kChat WebSocket inbound reply context preserves channel and thread roots",
   assert.equal(
     (
       await dispatchKchatWebSocketEvent({
-        cfg: { channels: { kchat: { teamName: "main-team", websocketChannelScope: "all", defaultChannel: "id:wrong-default-channel" } } },
-        channelConfig: { teamName: "main-team", websocketChannelScope: "all", defaultChannel: "id:wrong-default-channel" },
+        cfg: {
+          channels: {
+            kchat: {
+              teamName: "main-team",
+              websocketChannelScope: "all",
+              defaultChannel: "id:wrong-default-channel",
+              responseMode: "all",
+            },
+          },
+        },
+        channelConfig: {
+          teamName: "main-team",
+          websocketChannelScope: "all",
+          defaultChannel: "id:wrong-default-channel",
+          responseMode: "all",
+        },
         runtime: createKchatRuntimeStub({ inboundRuns: rootRuns, realContext: true }),
         frame: rootFrame,
       })
@@ -1821,8 +2251,24 @@ test("kChat WebSocket connection authenticates and dispatches posted events", as
   );
 
   const connection = runKchatWebSocketConnection({
-    cfg: { channels: { kchat: { teamName: "main-team", websocketProtocol: "mattermost", websocketChannelIds: ["channel-123"], ignoredUserIds: ["ignored-user"] } } },
-    channelConfig: { teamName: "main-team", websocketProtocol: "mattermost", websocketChannelIds: ["channel-123"], ignoredUserIds: ["ignored-user"] },
+    cfg: {
+      channels: {
+        kchat: {
+          teamName: "main-team",
+          websocketProtocol: "mattermost",
+          websocketChannelIds: ["channel-123"],
+          ignoredUserIds: ["ignored-user"],
+          responseMode: "all",
+        },
+      },
+    },
+    channelConfig: {
+      teamName: "main-team",
+      websocketProtocol: "mattermost",
+      websocketChannelIds: ["channel-123"],
+      ignoredUserIds: ["ignored-user"],
+      responseMode: "all",
+    },
     token: "placeholder-token",
     WebSocketImpl: MockWebSocket,
     runtime: createKchatRuntimeStub({ inboundRuns }),
@@ -1959,6 +2405,86 @@ test("kChat WebSocket connection authenticates and dispatches posted events", as
   assert.equal(socket.closed, true);
 });
 
+test("kChat WebSocket not-addressed diagnostics stay identifier-only", async () => {
+  const { runKchatWebSocketConnection } = await import(pathToFileURL(join(repositoryRoot, "index.js")).href);
+  const inboundRuns = [];
+  const dispatchResults = [];
+  const debugLogs = [];
+  const abortController = new AbortController();
+  MockWebSocket.instances = [];
+
+  const connection = runKchatWebSocketConnection({
+    cfg: { channels: { kchat: { teamName: "main-team", websocketProtocol: "mattermost", websocketChannelIds: ["channel-123"] } } },
+    channelConfig: { teamName: "main-team", websocketProtocol: "mattermost", websocketChannelIds: ["channel-123"] },
+    token: "placeholder-token",
+    WebSocketImpl: MockWebSocket,
+    runtime: createKchatRuntimeStub({ inboundRuns }),
+    client: {
+      kchat: {
+        async getuser() {
+          return { id: "bot-user", username: "Potassium.Bot" };
+        },
+      },
+    },
+    abortSignal: abortController.signal,
+    log: {
+      debug(message) {
+        debugLogs.push(message);
+      },
+    },
+    onDispatchResult(result) {
+      dispatchResults.push(result);
+    },
+  });
+
+  await waitImmediate();
+  const socket = MockWebSocket.instances[0];
+  socket.emitMessage(JSON.stringify({ status: "OK", seq_reply: 1 }));
+  socket.emitMessage(
+    JSON.stringify({
+      event: "posted",
+      data: {
+        channel_name: "test",
+        sender_name: "alice",
+        post: JSON.stringify({
+          id: "post-ws-not-addressed-log",
+          channel_id: "channel-123",
+          user_id: "user-123",
+          message: "sensitive body must not be logged",
+          create_at: 1710000000000,
+        }),
+      },
+      broadcast: {
+        team_id: "team-123",
+      },
+      seq: 2,
+    }),
+  );
+
+  await waitForCondition(() => dispatchResults.length === 1);
+  assert.equal(inboundRuns.length, 0);
+  assert.deepEqual(dispatchResults, [
+    {
+      dispatched: false,
+      reason: "not_addressed",
+      postId: "post-ws-not-addressed-log",
+      channelId: "channel-123",
+      teamId: "team-123",
+      userId: "user-123",
+      userName: "alice",
+    },
+  ]);
+  assert.match(debugLogs.join("\n"), /reason=not_addressed/);
+  assert.match(debugLogs.join("\n"), /postId=post-ws-not-addressed-log/);
+  assert.match(debugLogs.join("\n"), /channelId=channel-123/);
+  assert.equal(debugLogs.join("\n").includes("sensitive body must not be logged"), false);
+  assert.equal(debugLogs.join("\n").includes("placeholder-token"), false);
+
+  abortController.abort();
+  await connection;
+  assert.equal(socket.closed, true);
+});
+
 test("kChat WebSocket dispatch failure logs are redacted", async () => {
   const { runKchatWebSocketConnection } = await import(pathToFileURL(join(repositoryRoot, "index.js")).href);
   const errors = [];
@@ -1966,8 +2492,12 @@ test("kChat WebSocket dispatch failure logs are redacted", async () => {
   MockWebSocket.instances = [];
 
   const connection = runKchatWebSocketConnection({
-    cfg: { channels: { kchat: { teamName: "main-team", websocketProtocol: "mattermost", websocketChannelIds: ["channel-123"] } } },
-    channelConfig: { teamName: "main-team", websocketProtocol: "mattermost", websocketChannelIds: ["channel-123"] },
+    cfg: {
+      channels: {
+        kchat: { teamName: "main-team", websocketProtocol: "mattermost", websocketChannelIds: ["channel-123"], responseMode: "all" },
+      },
+    },
+    channelConfig: { teamName: "main-team", websocketProtocol: "mattermost", websocketChannelIds: ["channel-123"], responseMode: "all" },
     token: "placeholder-token",
     WebSocketImpl: MockWebSocket,
     runtime: {
@@ -2046,6 +2576,7 @@ test("kChat WebSocket dispatch queue bounds concurrent post handling", async () 
           websocketChannelIds: ["channel-123"],
           websocketDispatchConcurrency: 1,
           websocketDispatchQueueSize: 1,
+          responseMode: "all",
         },
       },
     },
@@ -2055,6 +2586,7 @@ test("kChat WebSocket dispatch queue bounds concurrent post handling", async () 
       websocketChannelIds: ["channel-123"],
       websocketDispatchConcurrency: 1,
       websocketDispatchQueueSize: 1,
+      responseMode: "all",
     },
     token: "placeholder-token",
     WebSocketImpl: MockWebSocket,
@@ -2299,8 +2831,8 @@ test("kChat Infomaniak Echo WebSocket subscribes and dispatches posted events", 
   };
 
   const connection = runKchatWebSocketConnection({
-    cfg: { channels: { kchat: { teamName: "main-team", websocketChannelIds: ["channel-123"] } } },
-    channelConfig: { teamName: "main-team", websocketChannelIds: ["channel-123"] },
+    cfg: { channels: { kchat: { teamName: "main-team", websocketChannelIds: ["channel-123"], responseMode: "all" } } },
+    channelConfig: { teamName: "main-team", websocketChannelIds: ["channel-123"], responseMode: "all" },
     token: "placeholder-token",
     WebSocketImpl: MockWebSocket,
     fetch,
