@@ -6,7 +6,7 @@ listing links, creating links, updating expiration dates, and presenting public
 `chk.me` URLs.
 
 The executable skill instructions live in
-[`skills/url-shortener/SKILL.md`](../skills/url-shortener/SKILL.md).
+[`skills/url-shortener/SKILL.md`](../../skills/url-shortener/SKILL.md).
 
 ## Capabilities
 
@@ -86,5 +86,5 @@ than dumping the entire response unless the user asks for raw data.
 ## Related Docs
 
 - [Potassium Skill](potassium.md)
-- [Architecture](architecture.md)
-- [Liquid Potassium Integration](liquid-potassium-integration.md)
+- [Architecture](../architecture.md)
+- [Liquid Potassium Integration](../liquid-potassium-integration.md)

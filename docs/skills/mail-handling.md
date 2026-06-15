@@ -5,7 +5,7 @@ Potassium's `infomaniak_mail_application` tool. It covers mailbox and folder
 resolution, unread mail review, message reads, message moves, and draft actions.
 
 The executable skill instructions live in
-[`skills/mail-handling/SKILL.md`](../skills/mail-handling/SKILL.md).
+[`skills/mail-handling/SKILL.md`](../../skills/mail-handling/SKILL.md).
 
 ## Capabilities
 
@@ -95,5 +95,5 @@ For draft or move actions, summarize what changed and any verification result.
 ## Related Docs
 
 - [Potassium Skill](potassium.md)
-- [Architecture](architecture.md)
-- [Liquid Potassium Integration](liquid-potassium-integration.md)
+- [Architecture](../architecture.md)
+- [Liquid Potassium Integration](../liquid-potassium-integration.md)

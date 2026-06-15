@@ -6,7 +6,7 @@ reviewed workflows and lower-level discovery tools, and how to keep credentials
 and mutations under control.
 
 Use this document for package-level behavior. The executable skill instructions
-live in [`skills/potassium/SKILL.md`](../skills/potassium/SKILL.md).
+live in [`skills/potassium/SKILL.md`](../../skills/potassium/SKILL.md).
 
 ## When To Use
 
@@ -98,5 +98,6 @@ tools.
 
 - [kDrive Writing](kdrive-writing.md)
 - [Mail Handling](mail-handling.md)
-- [kChat Channel](kchat-channel.md)
+- [kChat Posting](kchat-posting.md)
+- [kChat Channel](../kchat-channel.md)
 - [URL Shortener](url-shortener.md)

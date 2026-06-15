@@ -6,7 +6,7 @@ creating default files, uploading local files, and verifying the result without
 writing to unexpected locations.
 
 The executable skill instructions live in
-[`skills/kdrive-writing/SKILL.md`](../skills/kdrive-writing/SKILL.md).
+[`skills/kdrive-writing/SKILL.md`](../../skills/kdrive-writing/SKILL.md).
 
 ## Capabilities
 
@@ -105,5 +105,5 @@ For successful writes, summarize:
 ## Related Docs
 
 - [Potassium Skill](potassium.md)
-- [Architecture](architecture.md)
-- [Liquid Potassium Integration](liquid-potassium-integration.md)
+- [Architecture](../architecture.md)
+- [Liquid Potassium Integration](../liquid-potassium-integration.md)
