@@ -47,7 +47,7 @@ Useful `channels.kchat` config:
 - `outgoingWebhookTokenEnvName`: webhook verification token env var, default `INFOMANIAK_KCHAT_OUTGOING_WEBHOOK_TOKEN`.
 - `ignoredUserIds` and `ignoredUserNames`: inbound senders to drop, usually the posting account.
 
-Outbound destinations may be `id:<channel_id>`, `#channel`, `channel`, or `team/channel`. Replies in threads should preserve the thread or root post id as the kChat `root_id`.
+Outbound destinations may be `id:<channel_id>`, `#channel`, `channel`, or `team/channel`. Replies in threads should preserve the thread or root post id as the kChat `root_id`. When OpenClaw sends generated media, Potassium uploads the file to kChat and attaches the returned `file_ids` to the post.
 
 Inbound kChat events are the routing authority for assistant replies. If the event has `channel_id`, reply to `id:<channel_id>` even when `defaultChannel` is configured. If the event has `root_id`, keep replies in that thread. If the event is a root post with `post_id` and no `root_id`, reply under that original post as the thread root. Do not fall back to `defaultChannel` for inbound events missing `channel_id`; treat them as missing reply context.
 

@@ -1,6 +1,7 @@
 import { buildJsonPluginConfigSchema, definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
 import { createChannelPluginBase } from "openclaw/plugin-sdk/channel-core";
 import { createMessageReceiptFromOutboundResults, defineChannelMessageAdapter } from "openclaw/plugin-sdk/channel-outbound";
+import { loadOutboundMediaFromUrl } from "openclaw/plugin-sdk/outbound-media";
 import { resolveThreadSessionKeys } from "openclaw/plugin-sdk/routing";
 import { isRequestBodyLimitError, readRequestBodyWithLimit, requestBodyErrorToText } from "openclaw/plugin-sdk/webhook-ingress";
 import {
@@ -12,6 +13,7 @@ import {
 } from "liquid-potassium";
 import { createInfomaniakOpenClawTools, InfomaniakPluginConfigJsonSchema, resolveInfomaniakPluginConfig } from "liquid-potassium/openclaw/tools";
 import { timingSafeEqual } from "node:crypto";
+import { basename } from "node:path";
 
 const DEFAULT_INFOMANIAK_TOKEN_ENV_NAME = "INFOMANIAK_TOKEN";
 const DEFAULT_KCHAT_OUTGOING_WEBHOOK_TOKEN_ENV_NAME = "INFOMANIAK_KCHAT_OUTGOING_WEBHOOK_TOKEN";
@@ -20,6 +22,8 @@ const KCHAT_WEBHOOK_BODY_LIMIT_BYTES = 64 * 1024;
 const KCHAT_WEBHOOK_BODY_TIMEOUT_MS = 5000;
 const DEFAULT_KCHAT_RECEIVE_MODE = "webhook";
 const KCHAT_RECEIVE_MODES = new Set(["webhook", "websocket", "both", "disabled"]);
+const DEFAULT_KCHAT_RESPONSE_MODE = "mentions";
+const KCHAT_RESPONSE_MODES = new Set(["mentions", "all"]);
 const DEFAULT_KCHAT_WEBSOCKET_RECONNECT_INITIAL_MS = 1000;
 const DEFAULT_KCHAT_WEBSOCKET_RECONNECT_MAX_MS = 30000;
 const DEFAULT_KCHAT_WEBSOCKET_PROTOCOL = "infomaniak-echo";
@@ -85,6 +89,25 @@ export const PotassiumKchatChannelConfigJsonSchema = {
       default: DEFAULT_KCHAT_RECEIVE_MODE,
       description:
         "Inbound receive mode. Use websocket to receive kChat/Mattermost events without a public webhook callback URL.",
+    },
+    responseMode: {
+      type: "string",
+      enum: ["mentions", "all"],
+      default: DEFAULT_KCHAT_RESPONSE_MODE,
+      description:
+        "Inbound response mode preference. Use mentions to respond only when addressed, or all to respond to every accepted inbound message.",
+    },
+    mentionAliases: {
+      type: "array",
+      items: {
+        type: "string",
+      },
+      description:
+        "Additional complete mention or address aliases that should be treated as addressing this kChat account.",
+    },
+    ignoreSelfMessages: {
+      type: "boolean",
+      description: "Whether inbound kChat messages from the authenticated account should be ignored.",
     },
     websocketProtocol: {
       type: "string",
@@ -269,6 +292,9 @@ export const potassiumKchatChannelPlugin = {
         const typingIndicator = readOptionalBoolean(inputRecord.typingIndicator);
         const setOnlineOnReplyStart = readOptionalBoolean(inputRecord.setOnlineOnReplyStart);
         const receiveMode = readOptionalString(inputRecord.receiveMode);
+        const responseMode = readOptionalString(inputRecord.responseMode);
+        const mentionAliases = readOptionalStringArray(inputRecord.mentionAliases);
+        const ignoreSelfMessages = readOptionalBoolean(inputRecord.ignoreSelfMessages);
         const websocketProtocol = readOptionalString(inputRecord.websocketProtocol);
         const webhookPath = readOptionalString(inputRecord.webhookPath);
         const outgoingWebhookTokenEnvName = readOptionalString(inputRecord.outgoingWebhookTokenEnvName);
@@ -304,6 +330,9 @@ export const potassiumKchatChannelPlugin = {
               ...(typingIndicator === undefined ? {} : { typingIndicator }),
               ...(setOnlineOnReplyStart === undefined ? {} : { setOnlineOnReplyStart }),
               ...(isKnownKchatReceiveMode(receiveMode) ? { receiveMode } : {}),
+              ...(isKnownKchatResponseMode(responseMode) ? { responseMode } : {}),
+              ...(mentionAliases ? { mentionAliases } : {}),
+              ...(ignoreSelfMessages === undefined ? {} : { ignoreSelfMessages }),
               ...(isKnownKchatWebSocketProtocol(websocketProtocol) ? { websocketProtocol } : {}),
               ...(webhookPath ? { webhookPath } : {}),
               ...(outgoingWebhookTokenEnvName ? { outgoingWebhookTokenEnvName } : {}),
@@ -396,6 +425,7 @@ export const potassiumKchatChannelPlugin = {
     deliveryMode: "direct",
     deliveryCapabilities: {
       durableFinal: {
+        media: true,
         text: true,
         replyTo: true,
         thread: true,
@@ -411,6 +441,9 @@ export const potassiumKchatChannelPlugin = {
     },
     sendText(ctx) {
       return sendKchatText(ctx).then(({ deliveryResult }) => deliveryResult);
+    },
+    sendMedia(ctx) {
+      return sendKchatMedia(ctx).then(({ deliveryResult }) => deliveryResult);
     },
   },
   gateway: {
@@ -463,6 +496,7 @@ export function createPotassiumKchatMessageAdapter(options = {}) {
     id: KCHAT_CHANNEL_ID,
     durableFinal: {
       capabilities: {
+        media: true,
         text: true,
         replyTo: true,
         thread: true,
@@ -471,6 +505,14 @@ export function createPotassiumKchatMessageAdapter(options = {}) {
     send: {
       text: async (ctx) => {
         const { receipt, messageId, providerResult } = await sendKchatText(ctx, options);
+        return {
+          receipt,
+          ...(messageId ? { messageId } : {}),
+          providerResult,
+        };
+      },
+      media: async (ctx) => {
+        const { receipt, messageId, providerResult } = await sendKchatMedia(ctx, options);
         return {
           receipt,
           ...(messageId ? { messageId } : {}),
@@ -537,6 +579,79 @@ export async function sendKchatText(ctx, options = {}) {
     receipt,
     ...(messageId ? { messageId } : {}),
     providerResult,
+  };
+}
+
+export async function sendKchatMedia(ctx, options = {}) {
+  const destination = await resolveKchatDestination({
+    cfg: ctx.cfg,
+    to: ctx.to,
+    client: options.client,
+    createClient: options.createClient,
+    fetch: options.fetch,
+    signal: ctx.signal,
+    token: options.token,
+  });
+  const channelConfig = resolveKchatChannelConfig(ctx.cfg);
+  const client = destination.client ?? resolveKchatClient({
+    channelConfig,
+    client: options.client,
+    createClient: options.createClient,
+    fetch: options.fetch,
+    token: options.token,
+  });
+  const operations = resolveKchatOperations(client);
+  const media = await loadKchatOutboundMedia(ctx, options);
+  const { fileIds, uploadResult } = await uploadKchatMediaFile({
+    operations,
+    channelId: destination.channelId,
+    media,
+    mediaUrl: ctx.mediaUrl,
+    signal: ctx.signal,
+  });
+  const rootId = resolveKchatRootId(ctx);
+  const body = {
+    channel_id: destination.channelId,
+    message: String(ctx.text ?? ""),
+    file_ids: fileIds,
+    ...(rootId ? { root_id: rootId } : {}),
+  };
+  const query = resolveKchatSetOnlineQuery(channelConfig);
+  const providerResult = await operations.createpost({
+    body,
+    ...(query ? { query } : {}),
+    ...(ctx.signal ? { signal: ctx.signal } : {}),
+  });
+  const messageId = resolveProviderPostId(providerResult);
+  const deliveryResult = {
+    channel: KCHAT_CHANNEL_ID,
+    messageId: messageId ?? "",
+    channelId: destination.channelId,
+    conversationId: destination.conversationId,
+    timestamp: resolveProviderTimestamp(providerResult),
+    meta: {
+      rawProviderResult: providerResult,
+      rawUploadResult: uploadResult,
+      kchatFileIds: fileIds,
+    },
+  };
+  const receipt = createMessageReceiptFromOutboundResults({
+    results: [deliveryResult],
+    kind: "media",
+    threadId: ctx.threadId == null ? undefined : String(ctx.threadId),
+    replyToId: ctx.replyToId ?? undefined,
+  });
+
+  return {
+    deliveryResult: {
+      ...deliveryResult,
+      receipt,
+    },
+    receipt,
+    ...(messageId ? { messageId } : {}),
+    providerResult,
+    uploadResult,
+    fileIds,
   };
 }
 
@@ -741,6 +856,7 @@ export function normalizeKchatOutgoingWebhookPayload(payload) {
   const rawText = readOptionalString(payload.text);
   const channelId = readOptionalString(payload.channel_id) ?? readOptionalString(payload.channelId);
   const channelName = readOptionalString(payload.channel_name) ?? readOptionalString(payload.channelName);
+  const channelType = readOptionalString(payload.channel_type) ?? readOptionalString(payload.channelType);
   const teamDomain = readOptionalString(payload.team_domain) ?? readOptionalString(payload.teamDomain);
   const teamId = readOptionalString(payload.team_id) ?? readOptionalString(payload.teamId);
   const postId = readOptionalString(payload.post_id) ?? readOptionalString(payload.postId) ?? readOptionalString(payload.id);
@@ -766,6 +882,7 @@ export function normalizeKchatOutgoingWebhookPayload(payload) {
     textForCommands: rawText,
     channelId,
     channelName,
+    channelType,
     teamDomain,
     teamId,
     conversationId,
@@ -1185,6 +1302,7 @@ function normalizeKchatWebSocketPostEventPayload(event, channelConfig = {}) {
 
   const channelId = readOptionalString(event.channelId);
   const channelName = readOptionalString(event.channelName);
+  const channelType = readOptionalString(event.channelType) ?? readOptionalString(event.channel_type);
   const teamDomain = readOptionalString(event.teamDomain) ?? readOptionalString(channelConfig.teamName);
   const teamId = readOptionalString(event.teamId);
   const postId = readOptionalString(event.postId) ?? readOptionalString(event.id);
@@ -1197,6 +1315,7 @@ function normalizeKchatWebSocketPostEventPayload(event, channelConfig = {}) {
   return {
     ...(channelId ? { channel_id: channelId } : {}),
     ...(channelName ? { channel_name: channelName } : {}),
+    ...(channelType ? { channel_type: channelType } : {}),
     ...(teamDomain ? { team_domain: teamDomain } : {}),
     ...(teamId ? { team_id: teamId } : {}),
     ...(postId ? { post_id: postId } : {}),
@@ -1465,6 +1584,15 @@ function resolveKchatReceiveMode(channelConfig) {
 
 function isKnownKchatReceiveMode(receiveMode) {
   return receiveMode !== undefined && KCHAT_RECEIVE_MODES.has(receiveMode);
+}
+
+export function resolveKchatResponseMode(channelConfig = {}) {
+  const responseMode = readOptionalString(isRecord(channelConfig) ? channelConfig.responseMode : undefined);
+  return isKnownKchatResponseMode(responseMode) ? responseMode : DEFAULT_KCHAT_RESPONSE_MODE;
+}
+
+function isKnownKchatResponseMode(responseMode) {
+  return responseMode !== undefined && KCHAT_RESPONSE_MODES.has(responseMode);
 }
 
 function shouldRegisterKchatWebhook(channelConfig) {
@@ -1786,12 +1914,127 @@ function resolveKchatSetOnlineQuery(channelConfig) {
   return setOnline === undefined ? undefined : { set_online: setOnline };
 }
 
+async function loadKchatOutboundMedia(ctx, options) {
+  return await loadOutboundMediaFromUrl(ctx.mediaUrl, {
+    mediaAccess: ctx.mediaAccess,
+    mediaLocalRoots: ctx.mediaLocalRoots,
+    mediaReadFile: ctx.mediaReadFile,
+    fetchImpl: options.fetch,
+    ...(options.mediaMaxBytes === undefined ? {} : { maxBytes: options.mediaMaxBytes }),
+  });
+}
+
+async function uploadKchatMediaFile({ operations, channelId, media, mediaUrl, signal }) {
+  if (typeof operations.uploadfile !== "function") {
+    throw new Error("Infomaniak kChat uploadfile operation is unavailable.");
+  }
+
+  const fileName = resolveKchatMediaFileName(media, mediaUrl);
+  const fileOptions = media.contentType ? { type: media.contentType } : {};
+  const formData = new FormData();
+  formData.set("channel_id", channelId);
+  formData.append("files", new File([media.buffer], fileName, fileOptions), fileName);
+
+  const uploadResult = await operations.uploadfile({
+    body: formData,
+    ...(signal ? { signal } : {}),
+  });
+  const fileIds = resolveKchatUploadFileIds(uploadResult);
+  if (fileIds.length === 0) {
+    throw new Error("Infomaniak kChat uploadfile response did not include a file id.");
+  }
+
+  return { fileIds, uploadResult };
+}
+
+function resolveKchatUploadFileIds(uploadResult) {
+  const result = isRecord(uploadResult) ? uploadResult : {};
+  const directFileIds =
+    readOptionalStringArray(result.file_ids) ??
+    readOptionalStringArray(result.fileIds) ??
+    [
+      readOptionalString(result.file_id),
+      readOptionalString(result.fileId),
+      readOptionalString(result.id),
+    ].filter(Boolean);
+  if (directFileIds.length > 0) {
+    return directFileIds;
+  }
+
+  const fileInfos = Array.isArray(result.file_infos)
+    ? result.file_infos
+    : Array.isArray(result.fileInfos)
+      ? result.fileInfos
+      : Array.isArray(result.files)
+        ? result.files
+        : [];
+
+  return fileInfos
+    .map((entry) => {
+      if (!isRecord(entry)) {
+        return readOptionalString(entry);
+      }
+
+      return readOptionalString(entry.id) ?? readOptionalString(entry.file_id) ?? readOptionalString(entry.fileId);
+    })
+    .filter(Boolean);
+}
+
+function resolveKchatMediaFileName(media, mediaUrl) {
+  return readOptionalString(media.fileName) ?? resolveKchatMediaFileNameFromUrl(mediaUrl) ?? `openclaw-media${resolveKchatMediaFileExtension(media)}`;
+}
+
+function resolveKchatMediaFileNameFromUrl(mediaUrl) {
+  const rawUrl = readOptionalString(mediaUrl);
+  if (!rawUrl) {
+    return undefined;
+  }
+
+  try {
+    const url = new URL(rawUrl);
+    if (url.protocol === "data:") {
+      return undefined;
+    }
+
+    return readOptionalString(basename(decodeURIComponent(url.pathname)));
+  } catch {
+    return readOptionalString(basename(rawUrl.split(/[?#]/, 1)[0] ?? ""));
+  }
+}
+
+function resolveKchatMediaFileExtension(media) {
+  const contentType = readOptionalString(media.contentType)?.split(";", 1)[0]?.toLowerCase();
+  if (!contentType) {
+    return "";
+  }
+
+  const extensionByContentType = {
+    "image/gif": ".gif",
+    "image/jpeg": ".jpg",
+    "image/png": ".png",
+    "image/webp": ".webp",
+    "audio/mpeg": ".mp3",
+    "application/pdf": ".pdf",
+    "text/plain": ".txt",
+  };
+  return extensionByContentType[contentType] ?? "";
+}
+
 function resolveKchatTypingIndicatorEnabled(channelConfig) {
   return readOptionalBoolean(channelConfig.typingIndicator) ?? true;
 }
 
-async function resolveKchatCurrentUserId(operations, options = {}) {
-  if (typeof operations.getuser !== "function") {
+export async function resolveKchatCurrentUserId(operations, options = {}) {
+  const currentUser = await resolveKchatCurrentUserIdentity(operations, options);
+  return currentUser.id;
+}
+
+export async function resolveKchatCurrentUser(operations, options = {}) {
+  return await resolveKchatCurrentUserIdentity(operations, options);
+}
+
+export async function resolveKchatCurrentUserIdentity(operations, options = {}) {
+  if (typeof operations?.getuser !== "function") {
     throw new Error("Infomaniak kChat getuser operation is unavailable.");
   }
 
@@ -1801,12 +2044,148 @@ async function resolveKchatCurrentUserId(operations, options = {}) {
     },
     ...(options.signal ? { signal: options.signal } : {}),
   });
-  const userId = resolveProviderUserId(currentUser);
-  if (!userId) {
+  const user = resolveProviderUser(currentUser);
+  if (!user.id) {
     throw new Error("Infomaniak kChat current user response did not include an id.");
   }
 
-  return userId;
+  return user;
+}
+
+export function resolveKchatMentionAliases(identity = {}, channelConfig = {}) {
+  const user = resolveProviderUser(identity);
+  const config = isRecord(channelConfig) ? channelConfig : {};
+  return normalizeKchatMentionAliasList([
+    user.username,
+    user.name,
+    ...(readOptionalStringArray(config.mentionAliases) ?? []),
+  ]);
+}
+
+export function matchKchatMentionAlias(message, aliases) {
+  const text = readOptionalString(message);
+  if (!text) {
+    return undefined;
+  }
+
+  const normalizedAliases = normalizeKchatMentionAliasList(aliases);
+  const sortedAliases = normalizedAliases
+    .map((alias, index) => ({ alias, index }))
+    .sort((left, right) => right.alias.length - left.alias.length || left.index - right.index);
+
+  for (const { alias } of sortedAliases) {
+    const match = createKchatMentionAliasRegExp(alias).exec(text);
+    if (match) {
+      const token = match[1];
+      return {
+        alias,
+        token,
+        atMention: token.startsWith("@"),
+      };
+    }
+  }
+
+  return undefined;
+}
+
+export function isKchatMessageAddressedToAliases(message, aliases) {
+  return Boolean(matchKchatMentionAlias(message, aliases));
+}
+
+export function messageMentionsKchatAlias(message, aliases) {
+  return isKchatMessageAddressedToAliases(message, aliases);
+}
+
+export function resolveKchatExistingThreadRootId(inbound) {
+  if (!isRecord(inbound)) {
+    return undefined;
+  }
+
+  return (
+    readOptionalString(inbound.rootId) ??
+    readOptionalString(inbound.root_id) ??
+    readOptionalString(inbound.raw?.root_id) ??
+    readOptionalString(inbound.raw?.rootId)
+  );
+}
+
+export function hasKchatExistingThread(inbound) {
+  return Boolean(resolveKchatExistingThreadRootId(inbound));
+}
+
+export function resolveKchatInboundConversationKind(inbound) {
+  const channelType = resolveKchatInboundChannelType(inbound);
+  if (!channelType) {
+    return undefined;
+  }
+
+  const normalized = channelType.toLowerCase();
+  if (normalized === "d" || normalized === "direct") {
+    return "direct";
+  }
+  if (normalized === "g" || normalized === "group" || normalized === "group-dm" || normalized === "group_dm") {
+    return "group";
+  }
+  if (normalized === "o" || normalized === "p" || normalized === "channel" || normalized === "public" || normalized === "private") {
+    return "channel";
+  }
+
+  return undefined;
+}
+
+export function isKchatDirectOrGroupDm(inbound) {
+  const kind = resolveKchatInboundConversationKind(inbound);
+  return kind === "direct" || kind === "group";
+}
+
+function resolveKchatInboundChannelType(inbound) {
+  if (!isRecord(inbound)) {
+    return undefined;
+  }
+
+  return (
+    readOptionalString(inbound.channelType) ??
+    readOptionalString(inbound.channel_type) ??
+    readOptionalString(inbound.raw?.channel_type) ??
+    readOptionalString(inbound.raw?.channelType)
+  );
+}
+
+function normalizeKchatMentionAliasList(value) {
+  const aliases = Array.isArray(value) ? value : [];
+  const seen = new Set();
+  const normalizedAliases = [];
+
+  for (const aliasValue of aliases) {
+    const alias = normalizeKchatMentionAlias(aliasValue);
+    if (!alias) {
+      continue;
+    }
+
+    const key = alias.toLocaleLowerCase();
+    if (seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+    normalizedAliases.push(alias);
+  }
+
+  return normalizedAliases;
+}
+
+function normalizeKchatMentionAlias(value) {
+  const alias = readOptionalString(value);
+  if (!alias) {
+    return undefined;
+  }
+
+  return readOptionalString(alias.startsWith("@") ? alias.slice(1) : alias);
+}
+
+function createKchatMentionAliasRegExp(alias) {
+  const escapedAlias = escapeRegExp(alias);
+  return new RegExp(`(?<![\\p{L}\\p{N}_.@-])(@?${escapedAlias})(?=$|[^\\p{L}\\p{N}_.@-]|\\.(?=$|[^\\p{L}\\p{N}_-]))`, "iu");
 }
 
 function resolveProviderChannelId(value) {
@@ -1814,9 +2193,30 @@ function resolveProviderChannelId(value) {
   return readOptionalString(record?.id) ?? readOptionalString(record?.channel_id);
 }
 
+function resolveProviderUser(value) {
+  const record = unwrapProviderRecord(value) ?? {};
+  const id = readOptionalString(record.id) ?? readOptionalString(record.user_id) ?? readOptionalString(record.userId);
+  const username =
+    readOptionalString(record.username) ?? readOptionalString(record.user_name) ?? readOptionalString(record.userName);
+  const firstName = readOptionalString(record.first_name) ?? readOptionalString(record.firstName);
+  const lastName = readOptionalString(record.last_name) ?? readOptionalString(record.lastName);
+  const fullName = readOptionalString([firstName, lastName].filter(Boolean).join(" "));
+  const name =
+    readOptionalString(record.name) ??
+    readOptionalString(record.display_name) ??
+    readOptionalString(record.displayName) ??
+    readOptionalString(record.nickname) ??
+    fullName;
+
+  return {
+    ...(id ? { id } : {}),
+    ...(username ? { username } : {}),
+    ...(name ? { name } : {}),
+  };
+}
+
 function resolveProviderUserId(value) {
-  const record = unwrapProviderRecord(value);
-  return readOptionalString(record?.id) ?? readOptionalString(record?.user_id);
+  return resolveProviderUser(value).id;
 }
 
 function resolveProviderPostId(value) {
@@ -2135,6 +2535,10 @@ function readOptionalStringArray(value) {
 
   const strings = value.map((entry) => readOptionalString(entry)).filter(Boolean);
   return strings.length > 0 ? strings : undefined;
+}
+
+function escapeRegExp(value) {
+  return String(value).replace(/[\\^$.*+?()[\]{}|]/g, "\\$&");
 }
 
 function isRecord(value) {

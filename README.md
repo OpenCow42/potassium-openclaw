@@ -142,7 +142,7 @@ the correct kChat channel or thread.
 
 The channel supports:
 
-- outbound posts to `id:<channel_id>`, `#channel`, `channel`, or
+- outbound text and media posts to `id:<channel_id>`, `#channel`, `channel`, or
   `team/channel` destinations;
 - inbound receive modes: `webhook`, `websocket`, `both`, or `disabled`;
 - hosted Infomaniak Echo/Pusher WebSocket receive;

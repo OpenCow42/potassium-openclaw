@@ -21,6 +21,10 @@ const expectedToolNames = [
 ];
 const expectedChannelIds = ["kchat"];
 const websocketFixtureToken = "fixture";
+const tinyPngBuffer = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=",
+  "base64",
+);
 const dangerousRuntimeImports = [
   ["node:child", "_process"].join(""),
   ["child", "_process"].join(""),
@@ -79,6 +83,10 @@ test("package declares a native OpenClaw plugin backed by the published liquid-p
   assert.equal(nativeManifest.channelConfigs?.kchat?.schema?.properties?.typingIndicator?.default, true);
   assert.equal(nativeManifest.channelConfigs?.kchat?.schema?.properties?.setOnlineOnReplyStart?.type, "boolean");
   assert.equal(nativeManifest.channelConfigs?.kchat?.schema?.properties?.receiveMode?.default, "webhook");
+  assert.deepEqual(nativeManifest.channelConfigs?.kchat?.schema?.properties?.responseMode?.enum, ["mentions", "all"]);
+  assert.equal(nativeManifest.channelConfigs?.kchat?.schema?.properties?.responseMode?.default, "mentions");
+  assert.equal(nativeManifest.channelConfigs?.kchat?.schema?.properties?.mentionAliases?.items?.type, "string");
+  assert.equal(nativeManifest.channelConfigs?.kchat?.schema?.properties?.ignoreSelfMessages?.type, "boolean");
   assert.equal(nativeManifest.channelConfigs?.kchat?.schema?.properties?.websocketProtocol?.default, "infomaniak-echo");
   assert.equal(nativeManifest.channelConfigs?.kchat?.schema?.properties?.webhookPath?.default, "/channels/kchat/webhook");
   assert.equal(
@@ -140,6 +148,10 @@ test("runtime entry registers exactly the manifest tool contracts", async () => 
 
   assert.equal("token" in pluginModule.PotassiumPluginConfigJsonSchema.properties, false);
   assert.equal("token" in pluginModule.PotassiumKchatChannelConfigJsonSchema.properties, false);
+  assert.deepEqual(pluginModule.PotassiumKchatChannelConfigJsonSchema.properties.responseMode.enum, ["mentions", "all"]);
+  assert.equal(pluginModule.PotassiumKchatChannelConfigJsonSchema.properties.responseMode.default, "mentions");
+  assert.equal(pluginModule.PotassiumKchatChannelConfigJsonSchema.properties.mentionAliases.items.type, "string");
+  assert.equal(pluginModule.PotassiumKchatChannelConfigJsonSchema.properties.ignoreSelfMessages.type, "boolean");
 
   plugin.register({
     pluginConfig: { allowedDomains: ["kdrive"], tokenEnvName: "INFOMANIAK_TOKEN" },
@@ -166,7 +178,9 @@ test("runtime entry registers exactly the manifest tool contracts", async () => 
   assert.deepEqual(kchatChannel.capabilities.chatTypes, ["direct", "group", "channel", "thread"]);
   assert.equal(kchatChannel.message?.id, "kchat");
   assert.equal(kchatChannel.message?.send?.text instanceof Function, true);
+  assert.equal(kchatChannel.message?.send?.media instanceof Function, true);
   assert.deepEqual(kchatChannel.message?.durableFinal?.capabilities, {
+    media: true,
     text: true,
     replyTo: true,
     thread: true,
@@ -177,9 +191,26 @@ test("runtime entry registers exactly the manifest tool contracts", async () => 
   assert.equal(kchatChannel.messaging?.targetResolver?.resolveTarget instanceof Function, true);
   assert.equal(kchatChannel.outbound?.deliveryMode, "direct");
   assert.equal(kchatChannel.outbound?.sendText instanceof Function, true);
+  assert.equal(kchatChannel.outbound?.sendMedia instanceof Function, true);
   assert.equal(kchatChannel.gateway?.startAccount instanceof Function, true);
   assert.equal(kchatChannel.config.hasConfiguredState({ cfg: {}, env: { INFOMANIAK_TOKEN: "placeholder" } }), true);
   assert.equal(kchatChannel.config.hasConfiguredState({ cfg: {}, env: {} }), false);
+  assert.deepEqual(
+    kchatChannel.setup.applyAccountConfig({
+      cfg: {},
+      input: {
+        responseMode: "all",
+        mentionAliases: ["@PotassiumBot", "  Helper Desk  "],
+        ignoreSelfMessages: true,
+      },
+    }).channels.kchat,
+    {
+      enabled: true,
+      responseMode: "all",
+      mentionAliases: ["@PotassiumBot", "Helper Desk"],
+      ignoreSelfMessages: true,
+    },
+  );
   assert.deepEqual(
     registeredRoutes.map((route) => ({ path: route.path, auth: route.auth, match: route.match })),
     [{ path: "/channels/kchat/webhook", auth: "plugin", match: "exact" }],
@@ -298,6 +329,67 @@ test("kChat outbound resolves #channel destinations before creating posts", asyn
   assert.equal(result.messageId, "post-456");
   assert.equal(result.receipt.threadId, "thread-root");
   assert.equal(result.receipt.replyToId, "reply-ignored-when-thread-exists");
+});
+
+test("kChat outbound uploads media before creating posts with file_ids", async () => {
+  const { createPotassiumKchatMessageAdapter } = await import(pathToFileURL(join(repositoryRoot, "index.js")).href);
+  const calls = [];
+  const client = {
+    kchat: {
+      async uploadfile(request) {
+        calls.push(["uploadfile", request]);
+        return { file_infos: [{ id: "file-123" }] };
+      },
+      async createpost(request) {
+        calls.push(["createpost", request]);
+        return { id: "post-with-media", channel_id: "channel-123", create_at: 1710000000000 };
+      },
+    },
+  };
+  const adapter = createPotassiumKchatMessageAdapter({ client });
+
+  const result = await adapter.send.media({
+    cfg: { channels: { kchat: { teamName: "main-team", setOnline: false } } },
+    to: "id:channel-123",
+    text: "generated image",
+    mediaUrl: "/tmp/openclaw-kchat/outbound-image.png",
+    mediaLocalRoots: ["/tmp/openclaw-kchat"],
+    async mediaReadFile(filePath) {
+      assert.equal(filePath, "/tmp/openclaw-kchat/outbound-image.png");
+      return tinyPngBuffer;
+    },
+    threadId: "root-post",
+    replyToId: "ignored-when-thread-exists",
+  });
+
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0][0], "uploadfile");
+  assert.equal(calls[0][1].body instanceof FormData, true);
+  assert.equal(calls[0][1].body.get("channel_id"), "channel-123");
+  const uploadedFiles = calls[0][1].body.getAll("files");
+  assert.equal(uploadedFiles.length, 1);
+  assert.equal(uploadedFiles[0].name, "outbound-image.png");
+  assert.equal(uploadedFiles[0].type, "image/png");
+  assert.equal(uploadedFiles[0].size > 0, true);
+  assert.deepEqual(calls[1], [
+    "createpost",
+    {
+      body: {
+        channel_id: "channel-123",
+        message: "generated image",
+        file_ids: ["file-123"],
+        root_id: "root-post",
+      },
+      query: {
+        set_online: false,
+      },
+    },
+  ]);
+  assert.equal(result.messageId, "post-with-media");
+  assert.equal(result.receipt.primaryPlatformMessageId, "post-with-media");
+  assert.equal(result.receipt.threadId, "root-post");
+  assert.equal(result.receipt.replyToId, "ignored-when-thread-exists");
+  assert.deepEqual(result.providerResult, { id: "post-with-media", channel_id: "channel-123", create_at: 1710000000000 });
 });
 
 test("kChat message-tool sends inherit the current thread when #channel resolves to the same native channel", async () => {
@@ -487,6 +579,133 @@ test("kChat outbound works with the published liquid-potassium client shape", as
     message: "published client shape",
   });
   assert.equal(result.messageId, "post-from-real-client-shape");
+});
+
+test("kChat media outbound works with the published liquid-potassium client shape", async () => {
+  const { sendKchatMedia } = await import(pathToFileURL(join(repositoryRoot, "index.js")).href);
+  const tokenEnvName = "POTASSIUM_TEST_INFOMANIAK_TOKEN";
+  const originalToken = process.env[tokenEnvName];
+  const requests = [];
+
+  process.env[tokenEnvName] = "placeholder-token";
+  try {
+    var result = await sendKchatMedia(
+      {
+        cfg: { channels: { kchat: { teamName: "main-team", tokenEnvName, setOnline: false } } },
+        to: "id:media-channel-id",
+        text: "published media client shape",
+        mediaUrl: "/tmp/openclaw-kchat/published-client-image.png",
+        mediaLocalRoots: ["/tmp/openclaw-kchat"],
+        async mediaReadFile(filePath) {
+          assert.equal(filePath, "/tmp/openclaw-kchat/published-client-image.png");
+          return tinyPngBuffer;
+        },
+        replyToId: "root-from-reply",
+      },
+      {
+        fetch: async (url, init) => {
+          requests.push({
+            url: String(url),
+            method: init.method,
+            body: init.body,
+          });
+          if (String(url).endsWith("/api/v4/files")) {
+            return jsonResponse({ file_infos: [{ id: "published-file-id" }] });
+          }
+          if (String(url).endsWith("/api/v4/posts?set_online=false")) {
+            return jsonResponse({ id: "post-from-real-media-client-shape", channel_id: "media-channel-id" });
+          }
+
+          throw new Error(`unexpected fetch ${url}`);
+        },
+      },
+    );
+  } finally {
+    if (originalToken === undefined) {
+      delete process.env[tokenEnvName];
+    } else {
+      process.env[tokenEnvName] = originalToken;
+    }
+  }
+
+  assert.equal(requests.length, 2);
+  assert.equal(requests[0].method, "POST");
+  assert.equal(requests[0].url, "https://main-team.kchat.infomaniak.com/api/v4/files");
+  assert.equal(requests[0].body instanceof FormData, true);
+  assert.equal(requests[0].body.get("channel_id"), "media-channel-id");
+  assert.equal(requests[0].body.getAll("files")[0].name, "published-client-image.png");
+  assert.equal(requests[1].method, "POST");
+  assert.equal(requests[1].url, "https://main-team.kchat.infomaniak.com/api/v4/posts?set_online=false");
+  assert.deepEqual(JSON.parse(requests[1].body), {
+    channel_id: "media-channel-id",
+    message: "published media client shape",
+    file_ids: ["published-file-id"],
+    root_id: "root-from-reply",
+  });
+  assert.equal(result.messageId, "post-from-real-media-client-shape");
+  assert.deepEqual(result.fileIds, ["published-file-id"]);
+});
+
+test("kChat legacy outbound sendMedia uploads media through the channel plugin", async () => {
+  const { potassiumKchatChannelPlugin } = await import(pathToFileURL(join(repositoryRoot, "index.js")).href);
+  const tokenEnvName = "POTASSIUM_TEST_INFOMANIAK_TOKEN";
+  const originalToken = process.env[tokenEnvName];
+  const originalFetch = globalThis.fetch;
+  const requests = [];
+
+  process.env[tokenEnvName] = "placeholder-token";
+  globalThis.fetch = async (url, init = {}) => {
+    requests.push({
+      url: String(url),
+      method: init.method,
+      body: init.body,
+    });
+    if (String(url).endsWith("/api/v4/files")) {
+      return jsonResponse({ file_infos: [{ id: "legacy-file-id" }] });
+    }
+    if (String(url).endsWith("/api/v4/posts?set_online=false")) {
+      return jsonResponse({ id: "legacy-media-post", channel_id: "legacy-media-channel" });
+    }
+
+    throw new Error(`unexpected fetch ${url}`);
+  };
+
+  try {
+    var result = await potassiumKchatChannelPlugin.outbound.sendMedia({
+      cfg: { channels: { kchat: { teamName: "main-team", tokenEnvName, setOnline: false } } },
+      to: "id:legacy-media-channel",
+      text: "legacy outbound media",
+      mediaUrl: "/tmp/openclaw-kchat/legacy-outbound-image.png",
+      mediaLocalRoots: ["/tmp/openclaw-kchat"],
+      async mediaReadFile(filePath) {
+        assert.equal(filePath, "/tmp/openclaw-kchat/legacy-outbound-image.png");
+        return tinyPngBuffer;
+      },
+      threadId: "legacy-root-post",
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalToken === undefined) {
+      delete process.env[tokenEnvName];
+    } else {
+      process.env[tokenEnvName] = originalToken;
+    }
+  }
+
+  assert.equal(requests.length, 2);
+  assert.equal(requests[0].body instanceof FormData, true);
+  assert.equal(requests[0].body.get("channel_id"), "legacy-media-channel");
+  assert.equal(requests[0].body.getAll("files")[0].name, "legacy-outbound-image.png");
+  assert.deepEqual(JSON.parse(requests[1].body), {
+    channel_id: "legacy-media-channel",
+    message: "legacy outbound media",
+    file_ids: ["legacy-file-id"],
+    root_id: "legacy-root-post",
+  });
+  assert.equal(result.messageId, "legacy-media-post");
+  assert.equal(result.channelId, "legacy-media-channel");
+  assert.deepEqual(result.meta.kchatFileIds, ["legacy-file-id"]);
+  assert.equal(result.receipt.primaryPlatformMessageId, "legacy-media-post");
 });
 
 test("kChat inbound webhook dispatches valid JSON payloads through the channel runtime", async () => {
@@ -1109,6 +1328,103 @@ test("kChat inbound normalization preserves thread context and redacts tokens", 
   assert.equal(normalized.timestamp, 1710000000000);
   assert.equal(normalized.sender.username, "charlie");
   assert.equal(normalized.raw.token, "[redacted]");
+});
+
+test("kChat response-mode helpers resolve identity, aliases, threads, and DM channel types", async () => {
+  const {
+    hasKchatExistingThread,
+    isKchatDirectOrGroupDm,
+    isKchatMessageAddressedToAliases,
+    matchKchatMentionAlias,
+    normalizeKchatOutgoingWebhookPayload,
+    resolveKchatCurrentUserId,
+    resolveKchatCurrentUserIdentity,
+    resolveKchatExistingThreadRootId,
+    resolveKchatInboundConversationKind,
+    resolveKchatMentionAliases,
+    resolveKchatResponseMode,
+  } = await import(pathToFileURL(join(repositoryRoot, "index.js")).href);
+  const calls = [];
+  const abortController = new AbortController();
+  const operations = {
+    async getuser(request) {
+      calls.push(request);
+      return {
+        data: {
+          id: "bot-user-id",
+          username: "Potassium.Bot",
+          first_name: "Potassium",
+          last_name: "Bot",
+        },
+      };
+    },
+  };
+
+  const identity = await resolveKchatCurrentUserIdentity(operations, { signal: abortController.signal });
+  assert.deepEqual(identity, {
+    id: "bot-user-id",
+    username: "Potassium.Bot",
+    name: "Potassium Bot",
+  });
+  assert.deepEqual(calls[0].path, { user_id: "me" });
+  assert.equal(calls[0].signal, abortController.signal);
+  assert.equal(await resolveKchatCurrentUserId(operations), "bot-user-id");
+
+  const aliases = resolveKchatMentionAliases(identity, {
+    mentionAliases: ["@SupportBot", "potassium.bot", "Ops Desk", "  "],
+  });
+  assert.deepEqual(aliases, ["Potassium.Bot", "Potassium Bot", "SupportBot", "Ops Desk"]);
+  assert.equal(resolveKchatResponseMode({}), "mentions");
+  assert.equal(resolveKchatResponseMode({ responseMode: "all" }), "all");
+  assert.equal(resolveKchatResponseMode({ responseMode: "invalid" }), "mentions");
+
+  assert.deepEqual(matchKchatMentionAlias("please help @supportbot", aliases), {
+    alias: "SupportBot",
+    token: "@supportbot",
+    atMention: true,
+  });
+  assert.equal(isKchatMessageAddressedToAliases("Can POTASSIUM BOT: help here?", aliases), true);
+  assert.equal(isKchatMessageAddressedToAliases("route this to ops desk, please", aliases), true);
+  assert.equal(isKchatMessageAddressedToAliases("SupportBot. please help", aliases), true);
+  assert.equal(isKchatMessageAddressedToAliases("supportbotanywhere should not match", aliases), false);
+  assert.equal(isKchatMessageAddressedToAliases("cc @supportbot2 should not match", aliases), false);
+  assert.equal(isKchatMessageAddressedToAliases("cc @supportbot.name should not match", aliases), false);
+
+  const directThread = normalizeKchatOutgoingWebhookPayload({
+    channel_id: "direct-channel",
+    channel_type: "D",
+    post_id: "reply-post",
+    root_id: "root-post",
+    user_name: "alice",
+    text: "threaded direct message",
+  });
+  assert.equal(resolveKchatExistingThreadRootId(directThread), "root-post");
+  assert.equal(hasKchatExistingThread(directThread), true);
+  assert.equal(resolveKchatInboundConversationKind(directThread), "direct");
+  assert.equal(isKchatDirectOrGroupDm(directThread), true);
+
+  const groupThread = normalizeKchatOutgoingWebhookPayload({
+    channel_id: "group-channel",
+    channelType: "G",
+    post_id: "group-reply",
+    rootId: "group-root",
+    user_name: "bob",
+    text: "threaded group message",
+  });
+  assert.equal(resolveKchatExistingThreadRootId(groupThread), "group-root");
+  assert.equal(resolveKchatInboundConversationKind(groupThread), "group");
+  assert.equal(isKchatDirectOrGroupDm(groupThread), true);
+
+  const channelRoot = normalizeKchatOutgoingWebhookPayload({
+    channel_id: "public-channel",
+    channel_type: "O",
+    post_id: "root-post",
+    user_name: "charlie",
+    text: "root channel message",
+  });
+  assert.equal(hasKchatExistingThread(channelRoot), false);
+  assert.equal(resolveKchatInboundConversationKind(channelRoot), "channel");
+  assert.equal(isKchatDirectOrGroupDm(channelRoot), false);
 });
 
 test("kChat WebSocket helpers derive URLs and normalize posted events", async () => {
