@@ -42,11 +42,17 @@ test("package declares a native OpenClaw plugin backed by the published liquid-p
   const packageLock = JSON.parse(await readFile(join(repositoryRoot, "package-lock.json"), "utf8"));
   const nativeManifest = JSON.parse(await readFile(join(repositoryRoot, "openclaw.plugin.json"), "utf8"));
   const codexManifest = JSON.parse(await readFile(join(repositoryRoot, ".codex-plugin", "plugin.json"), "utf8"));
+  const packageDescription =
+    "Native OpenClaw tools and skills for Infomaniak kDrive, Mail, kChat, URL shortener, and discovery workflows.";
 
   assert.equal(packageJson.private, undefined, "public bundle must not be marked private");
+  assert.equal(packageJson.name, "@opencow42/potassium-openclaw");
+  assert.equal(packageLock.name, packageJson.name);
+  assert.equal(packageLock.packages?.[""]?.name, packageJson.name);
   assert.equal(packageJson.version, "0.4.0");
   assert.equal(packageLock.version, packageJson.version);
   assert.equal(packageLock.packages?.[""]?.version, packageJson.version);
+  assert.equal(packageJson.description, packageDescription);
   assert.equal(packageJson.license, "Apache-2.0");
   assert.equal(packageJson.homepage, "https://github.com/OpenCow42/potassium-openclaw#readme");
   assert.deepEqual(packageJson.repository, {
@@ -59,12 +65,19 @@ test("package declares a native OpenClaw plugin backed by the published liquid-p
   assert.equal(packageJson.publishConfig?.access, "public");
   assert.deepEqual(packageJson.files, [".codex-plugin", "openclaw.plugin.json", "index.js", "README.md", "LICENSE", "SECURITY.md", "docs", "skills"]);
   assert.deepEqual(packageJson.openclaw?.extensions, ["./index.js"]);
+  assert.equal(packageJson.openclaw?.compat?.pluginApi, ">=2026.6.6");
+  assert.equal(packageJson.openclaw?.compat?.minGatewayVersion, "2026.6.6");
+  assert.equal(packageJson.openclaw?.install?.clawhubSpec, packageJson.name);
+  assert.equal(packageJson.openclaw?.install?.npmSpec, packageJson.name);
+  assert.equal(packageJson.openclaw?.install?.defaultChoice, "clawhub");
+  assert.equal(packageJson.openclaw?.install?.minHostVersion, ">=2026.6.6");
   assert.equal(packageJson.dependencies?.["liquid-potassium"], "0.3.0");
   assert.equal(packageJson.peerDependencies?.openclaw, ">=2026.6.6");
 
   assert.equal(nativeManifest.id, "potassium");
   assert.equal(nativeManifest.version, packageJson.version);
   assert.equal(nativeManifest.name, "Potassium");
+  assert.equal(nativeManifest.description, "Native Infomaniak tools, skills, and kChat channel support for OpenClaw.");
   assert.deepEqual(nativeManifest.skills, ["./skills"]);
   assert.deepEqual(nativeManifest.channels, expectedChannelIds);
   assert.deepEqual(nativeManifest.channelEnvVars?.kchat, ["INFOMANIAK_TOKEN", "INFOMANIAK_KCHAT_OUTGOING_WEBHOOK_TOKEN"]);
@@ -113,11 +126,13 @@ test("package declares a native OpenClaw plugin backed by the published liquid-p
 
   assert.equal(codexManifest.name, "potassium");
   assert.equal(codexManifest.version, packageJson.version);
+  assert.equal(codexManifest.description, packageDescription);
   assert.equal(codexManifest.license, "Apache-2.0");
   assert.equal(codexManifest.repository, "https://github.com/OpenCow42/potassium-openclaw");
   assert.equal(codexManifest.author?.name, "OpenCow");
   assert.equal(codexManifest.skills, "./skills/");
   assert.equal(codexManifest.interface?.displayName, "Potassium");
+  assert.equal(codexManifest.interface?.shortDescription, "Use Infomaniak kDrive, Mail, kChat, and URL tools in OpenClaw.");
 });
 
 test("shipped kChat docs avoid install-specific examples", async () => {

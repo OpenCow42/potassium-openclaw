@@ -1,8 +1,8 @@
 {
-  "name": "@opencow/potassium-openclaw",
+  "name": "@opencow42/potassium-openclaw",
   "version": "0.4.0",
   "type": "module",
-  "description": "OpenClaw Infomaniak tools and skills backed by the liquid-potassium Node SDK.",
+  "description": "Native OpenClaw tools and skills for Infomaniak kDrive, Mail, kChat, URL shortener, and discovery workflows.",
   "license": "Apache-2.0",
   "author": "OpenCow",
   "homepage": "https://github.com/OpenCow42/potassium-openclaw#readme",
@@ -29,7 +29,21 @@
   "openclaw": {
     "extensions": [
       "./index.js"
-    ]
+    ],
+    "compat": {
+      "pluginApi": ">=2026.6.6",
+      "minGatewayVersion": "2026.6.6"
+    },
+    "build": {
+      "openclawVersion": "2026.6.6",
+      "pluginSdkVersion": "2026.6.6"
+    },
+    "install": {
+      "clawhubSpec": "@opencow42/potassium-openclaw",
+      "npmSpec": "@opencow42/potassium-openclaw",
+      "defaultChoice": "clawhub",
+      "minHostVersion": ">=2026.6.6"
+    }
   },
   "publishConfig": {
     "access": "public"

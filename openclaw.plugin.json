@@ -5,7 +5,7 @@
     "onStartup": false
   },
   "name": "Potassium",
-  "description": "Infomaniak OpenClaw tools backed by the liquid-potassium Node SDK.",
+  "description": "Native Infomaniak tools, skills, and kChat channel support for OpenClaw.",
   "skills": [
     "./skills"
   ],
