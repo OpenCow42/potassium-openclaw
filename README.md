@@ -5,6 +5,8 @@ registers OpenClaw tools backed by the published `liquid-potassium` Node SDK,
 ships agent skills for common Infomaniak tasks, and adds a dedicated kChat
 channel for live chat workflows.
 
+Quick setup website: <https://opencow42.github.io/potassium-openclaw/#install>
+
 The plugin is designed as an adapter layer: this repository owns the OpenClaw
 manifest, package metadata, skill guidance, docs, and safety defaults, while
 `liquid-potassium` owns the reusable Infomaniak API client and reviewed
@@ -40,6 +42,9 @@ services without hand-rolling HTTP calls or exposing credentials in prompts.
 | Policy | Apply domain allowlists, operation allowlists or denylists, and mutation blocking before SDK calls run. |
 
 ## Install
+
+For a guided install flow, start with the
+[quick setup website](https://opencow42.github.io/potassium-openclaw/#install).
 
 Requirements:
 
@@ -89,6 +94,25 @@ Keep Infomaniak bearer tokens in environment variables only:
 
 ```sh
 export INFOMANIAK_TOKEN="..."
+```
+
+For supported OpenClaw credential fields, prefer the built-in SecretRef
+workflow instead of plaintext config:
+
+```sh
+openclaw secrets configure
+openclaw secrets audit --check
+openclaw secrets reload
+```
+
+Potassium config should keep only the environment variable name for the
+Infomaniak token. Do not store the token value in OpenClaw memory or plugin
+config.
+
+Natural-language setup prompt for OpenClaw:
+
+```text
+Use OpenClaw's native secrets feature to configure my Infomaniak token for Potassium. Do not store the token in memory, chat history, plugin config, docs, logs, or committed files. Use SecretRefs or the Gateway environment as appropriate, keep Potassium configured with tokenEnvName: "INFOMANIAK_TOKEN", run openclaw secrets audit --check, then reload secrets or restart the Gateway. If you need the token value, ask me to enter it only through the OpenClaw secrets flow or a trusted local shell, not in chat.
 ```
 
 Minimal explicit plugin config:

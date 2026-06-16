@@ -5,7 +5,7 @@
   "description": "Native OpenClaw tools and skills for Infomaniak kDrive, Mail, kChat, URL shortener, and discovery workflows.",
   "license": "Apache-2.0",
   "author": "OpenCow",
-  "homepage": "https://github.com/OpenCow42/potassium-openclaw#readme",
+  "homepage": "https://opencow42.github.io/potassium-openclaw/",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/OpenCow42/potassium-openclaw.git"

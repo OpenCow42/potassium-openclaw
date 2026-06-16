@@ -54,7 +54,7 @@ test("package declares a native OpenClaw plugin backed by the published liquid-p
   assert.equal(packageLock.packages?.[""]?.version, packageJson.version);
   assert.equal(packageJson.description, packageDescription);
   assert.equal(packageJson.license, "Apache-2.0");
-  assert.equal(packageJson.homepage, "https://github.com/OpenCow42/potassium-openclaw#readme");
+  assert.equal(packageJson.homepage, "https://opencow42.github.io/potassium-openclaw/");
   assert.deepEqual(packageJson.repository, {
     type: "git",
     url: "git+https://github.com/OpenCow42/potassium-openclaw.git",

@@ -1,0 +1,315 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Potassium brings Infomaniak kDrive, Mail, kChat, URL shortener, and discovery workflows into OpenClaw.">
+    <meta property="og:title" content="Potassium for OpenClaw">
+    <meta property="og:description" content="Install native Infomaniak tools and skills for OpenClaw from ClawHub.">
+    <meta property="og:image" content="https://opencow42.github.io/potassium-openclaw/assets/openclaw-office-hero.png">
+    <meta property="og:type" content="website">
+    <title>Potassium for OpenClaw</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <a class="skip-link" href="#install">Skip to install</a>
+
+    <header class="site-header" aria-label="Primary navigation">
+      <a class="brand" href="#top" aria-label="Potassium home">
+        <span class="brand-mark" aria-hidden="true">K</span>
+        <span>Potassium</span>
+      </a>
+      <nav class="nav-links" aria-label="Site sections">
+        <a href="#capabilities">Capabilities</a>
+        <a href="#install">Install</a>
+        <a href="#examples">Examples</a>
+        <a href="#docs">Docs</a>
+      </nav>
+    </header>
+
+    <main id="top">
+      <section class="hero" aria-labelledby="hero-title">
+        <div class="hero-overlay"></div>
+        <div class="hero-content">
+          <p class="eyebrow">Infomaniak tools for OpenClaw</p>
+          <h1 id="hero-title">Potassium for OpenClaw</h1>
+          <p class="hero-copy">
+            Install one native plugin to give OpenClaw safe, reviewed access to
+            kDrive, Mail, kChat, URL shortener, and Infomaniak discovery workflows.
+          </p>
+          <div class="hero-actions" aria-label="Primary actions">
+            <a class="button button-primary" href="https://clawhub.ai/plugins/@opencow42/potassium-openclaw">Install from ClawHub</a>
+            <a class="button button-secondary" href="https://github.com/OpenCow42/potassium-openclaw">View source</a>
+          </div>
+          <div class="hero-command" aria-label="Primary install command">
+            <code>openclaw plugins install clawhub:@opencow42/potassium-openclaw</code>
+            <button class="copy-button" type="button" data-copy-target="hero-command-code">Copy</button>
+            <span id="hero-command-code" hidden>openclaw plugins install clawhub:@opencow42/potassium-openclaw</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="section section-light" id="capabilities" aria-labelledby="capabilities-title">
+        <div class="section-inner">
+          <div class="section-heading">
+            <p class="eyebrow">What it helps with</p>
+            <h2 id="capabilities-title">Practical Infomaniak work, inside OpenClaw</h2>
+            <p>
+              Potassium wraps the published liquid-potassium SDK with OpenClaw
+              tools, agent skills, and safety defaults that keep credentials out
+              of prompts and mutating actions blocked until you allow them.
+            </p>
+          </div>
+
+          <div class="capability-grid">
+            <article class="capability-card">
+              <span class="card-kicker">kDrive</span>
+              <h3>Find, create, and upload files</h3>
+              <p>Resolve drives and folders, create directories or starter files, upload local files, and verify results.</p>
+            </article>
+            <article class="capability-card">
+              <span class="card-kicker">Mail</span>
+              <h3>Review mail and manage drafts</h3>
+              <p>List mailboxes, inspect unread threads, move messages, and prepare draft responses through reviewed workflows.</p>
+            </article>
+            <article class="capability-card">
+              <span class="card-kicker">kChat</span>
+              <h3>Post and reply in channels</h3>
+              <p>Send text or media, reply in threads, receive inbound events, and keep conversation context intact.</p>
+            </article>
+            <article class="capability-card">
+              <span class="card-kicker">Links</span>
+              <h3>Create chk.me short links</h3>
+              <p>Check quota, list short links, create new links, and adjust expiration dates when mutations are enabled.</p>
+            </article>
+            <article class="capability-card">
+              <span class="card-kicker">Discovery</span>
+              <h3>Use the right Infomaniak action</h3>
+              <p>Search operation metadata, describe API capabilities, and discover reviewed workflow coverage before acting.</p>
+            </article>
+            <article class="capability-card">
+              <span class="card-kicker">Policy</span>
+              <h3>Default to controlled access</h3>
+              <p>Apply domain allowlists, operation allowlists or denylists, and mutation blocking before SDK calls run.</p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="section section-install" id="install" aria-labelledby="install-title">
+        <div class="section-inner install-layout">
+          <div class="section-heading">
+            <p class="eyebrow">Install in 4 steps</p>
+            <h2 id="install-title">Start with ClawHub, keep your token in the environment</h2>
+            <p>
+              The plugin reads <code>INFOMANIAK_TOKEN</code> from the OpenClaw
+              process environment by default. For credential storage, prefer
+              OpenClaw's built-in SecretRef workflow and audit command instead
+              of memory notes or plaintext config.
+            </p>
+          </div>
+
+          <div class="install-steps">
+            <article class="step">
+              <div class="step-number">1</div>
+              <div>
+                <h3>Install and enable Potassium</h3>
+                <div class="command-block">
+                  <div class="command-label">
+                    <span>ClawHub install</span>
+                    <button class="copy-button" type="button">Copy</button>
+                  </div>
+                  <pre><code>openclaw plugins install clawhub:@opencow42/potassium-openclaw
+openclaw plugins enable potassium</code></pre>
+                </div>
+              </div>
+            </article>
+
+            <article class="step">
+              <div class="step-number">2</div>
+              <div>
+                <h3>Handle the token with OpenClaw Secrets</h3>
+                <p class="step-note">
+                  Use OpenClaw's secrets helper for supported credentials and
+                  verify that no plaintext secret residue remains. Potassium
+                  still points at the env var name, so keep the secret value in
+                  a trusted Gateway source such as the Gateway process
+                  environment or the global OpenClaw runtime env file.
+                </p>
+                <div class="command-block">
+                  <div class="command-label">
+                    <span>Built-in secrets workflow</span>
+                    <button class="copy-button" type="button">Copy</button>
+                  </div>
+                  <pre><code>openclaw secrets configure
+openclaw secrets audit --check
+openclaw secrets reload</code></pre>
+                </div>
+                <div class="secret-note">
+                  <h4>Natural-language setup prompt</h4>
+                  <p>
+                    If you are asking OpenClaw to help with setup, use a prompt
+                    that routes the secret through the native secrets feature:
+                  </p>
+                  <div class="command-block">
+                    <div class="command-label">
+                      <span>Prompt for OpenClaw</span>
+                      <button class="copy-button" type="button">Copy</button>
+                    </div>
+                    <pre><code>Use OpenClaw's native secrets feature to configure my Infomaniak token for Potassium. Do not store the token in memory, chat history, plugin config, docs, logs, or committed files. Use SecretRefs or the Gateway environment as appropriate, keep Potassium configured with tokenEnvName: "INFOMANIAK_TOKEN", run openclaw secrets audit --check, then reload secrets or restart the Gateway. If you need the token value, ask me to enter it only through the OpenClaw secrets flow or a trusted local shell, not in chat.</code></pre>
+                  </div>
+                </div>
+                <div class="secret-note">
+                  <h4>Potassium token rule</h4>
+                  <p>
+                    Potassium does not need the token pasted into plugin config.
+                    Set the token where the OpenClaw Gateway can read it, then
+                    leave only the variable name in Potassium config.
+                  </p>
+                  <div class="command-block">
+                    <div class="command-label">
+                      <span>Gateway environment</span>
+                      <button class="copy-button" type="button">Copy</button>
+                    </div>
+                    <pre><code>export INFOMANIAK_TOKEN="&lt;your-infomaniak-token&gt;"</code></pre>
+                  </div>
+                </div>
+                <p class="doc-note">
+                  See OpenClaw's
+                  <a href="https://docs.openclaw.ai/gateway/secrets">Secrets management</a>
+                  and
+                  <a href="https://docs.openclaw.ai/cli/secrets">secrets CLI</a>
+                  docs for SecretRefs, providers, audits, and reloads.
+                </p>
+              </div>
+            </article>
+
+            <article class="step">
+              <div class="step-number">3</div>
+              <div>
+                <h3>Keep writes blocked by default</h3>
+                <div class="command-block">
+                  <div class="command-label">
+                    <span>OpenClaw config</span>
+                    <button class="copy-button" type="button">Copy</button>
+                  </div>
+                  <pre><code>openclaw config patch --stdin &lt;&lt;'JSON5'
+{
+  plugins: {
+    entries: {
+      potassium: {
+        enabled: true,
+        config: {
+          tokenEnvName: "INFOMANIAK_TOKEN",
+          blockMutating: true
+        }
+      }
+    }
+  }
+}
+JSON5</code></pre>
+                </div>
+              </div>
+            </article>
+
+            <article class="step">
+              <div class="step-number">4</div>
+              <div>
+                <h3>Restart and verify the runtime</h3>
+                <div class="command-block">
+                  <div class="command-label">
+                    <span>Gateway check</span>
+                    <button class="copy-button" type="button">Copy</button>
+                  </div>
+                  <pre><code>openclaw gateway restart
+openclaw plugins inspect potassium --runtime --json</code></pre>
+                </div>
+              </div>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="section section-light" id="examples" aria-labelledby="examples-title">
+        <div class="section-inner">
+          <div class="section-heading">
+            <p class="eyebrow">Example workflows</p>
+            <h2 id="examples-title">Ask for outcomes, not API plumbing</h2>
+          </div>
+
+          <div class="example-list">
+            <article class="example-item">
+              <span class="example-label">kDrive</span>
+              <p>“Create a project folder in kDrive, upload these local handoff files, and summarize what was created.”</p>
+            </article>
+            <article class="example-item">
+              <span class="example-label">Mail</span>
+              <p>“Review unread support threads, draft short replies for the urgent ones, and leave all writes blocked.”</p>
+            </article>
+            <article class="example-item">
+              <span class="example-label">kChat</span>
+              <p>“Post the deployment summary to the release channel and keep replies threaded in kChat.”</p>
+            </article>
+            <article class="example-item">
+              <span class="example-label">Short links</span>
+              <p>“Create a chk.me link for this release note and set an expiration date after the campaign.”</p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="section safety-band" aria-labelledby="safety-title">
+        <div class="section-inner safety-layout">
+          <div>
+            <p class="eyebrow">Safety defaults</p>
+            <h2 id="safety-title">Built to avoid accidental writes</h2>
+          </div>
+          <ul class="safety-list">
+            <li>Bearer tokens are read from environment variables only.</li>
+            <li>Use OpenClaw SecretRefs and <code>openclaw secrets audit --check</code> for supported credentials.</li>
+            <li>Mutating operations are blocked by default with `blockMutating: true`.</li>
+            <li>Reviewed workflows are preferred before lower-level raw calls.</li>
+            <li>Domain and operation policies run before SDK calls are made.</li>
+          </ul>
+        </div>
+      </section>
+
+      <section class="section section-light" id="docs" aria-labelledby="docs-title">
+        <div class="section-inner">
+          <div class="section-heading">
+            <p class="eyebrow">Keep going</p>
+            <h2 id="docs-title">Packages and documentation</h2>
+          </div>
+
+          <div class="link-grid">
+            <a class="link-card" href="https://clawhub.ai/plugins/@opencow42/potassium-openclaw">
+              <strong>ClawHub package</strong>
+              <span>Install the community OpenClaw plugin.</span>
+            </a>
+            <a class="link-card" href="https://www.npmjs.com/package/@opencow42/potassium-openclaw">
+              <strong>npm package</strong>
+              <span>Use npm as the fallback package source.</span>
+            </a>
+            <a class="link-card" href="https://github.com/OpenCow42/potassium-openclaw#readme">
+              <strong>README</strong>
+              <span>Read the full project overview and local development notes.</span>
+            </a>
+            <a class="link-card" href="https://github.com/OpenCow42/potassium-openclaw/tree/main/docs/skills">
+              <strong>Skill docs</strong>
+              <span>Open focused guidance for kDrive, Mail, kChat, URL shortener, and discovery.</span>
+            </a>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <span>Potassium for OpenClaw</span>
+      <a href="https://github.com/OpenCow42/potassium-openclaw/blob/main/SECURITY.md">Security policy</a>
+      <a href="https://github.com/OpenCow42/potassium-openclaw/blob/main/LICENSE">Apache-2.0</a>
+    </footer>
+
+    <div class="copy-status" role="status" aria-live="polite"></div>
+    <script src="main.js"></script>
+  </body>
+</html>
