@@ -201,6 +201,11 @@ test("runtime entry registers exactly the manifest tool contracts", async () => 
     replyTo: true,
     thread: true,
   });
+  assert.equal(kchatChannel.actions?.describeMessageTool instanceof Function, true);
+  assert.deepEqual(kchatChannel.actions.describeMessageTool({ cfg: { channels: { kchat: { enabled: true } } } }), {
+    actions: ["send"],
+  });
+  assert.equal(kchatChannel.actions.describeMessageTool({ cfg: { channels: { kchat: { enabled: false } } } }), null);
   assert.equal(kchatChannel.actions?.prepareSendPayload instanceof Function, true);
   assert.equal(kchatChannel.threading?.buildToolContext instanceof Function, true);
   assert.equal(kchatChannel.threading?.resolveAutoThreadId instanceof Function, true);
