@@ -358,6 +358,14 @@ export const potassiumKchatChannelPlugin = {
     },
   }),
   actions: {
+    describeMessageTool({ cfg, accountId } = {}) {
+      const account = resolveKchatAccount(cfg, accountId);
+      if (!account.enabled || !account.configured) {
+        return null;
+      }
+
+      return { actions: ["send"] };
+    },
     prepareSendPayload({ ctx, to, threadId }) {
       assertKchatThreadedMessageToolSend({
         params: ctx.params,

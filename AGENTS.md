@@ -23,4 +23,5 @@ Run:
 ```sh
 npm test
 npm run check
+npm run pack:check
 ```

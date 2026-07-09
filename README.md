@@ -217,10 +217,15 @@ task. The plugin should register the `infomaniak_*` tools listed above.
 npm install
 npm test
 npm run check
+npm run pack:check
 ```
 
 The default test suite uses metadata and mocked registration checks only. It
 does not call live Infomaniak APIs.
+
+The package contents check runs `npm pack --dry-run --json` and confirms the
+publish tarball includes the plugin metadata, docs, skills, README, license,
+security policy, and runtime entrypoint.
 
 ## Security
 

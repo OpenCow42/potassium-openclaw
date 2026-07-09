@@ -59,7 +59,8 @@
     "skills"
   ],
   "scripts": {
-    "check": "node --check index.js && node --check test/skill-metadata.test.js && node --check test/skills-first-package.test.js",
+    "check": "node --check index.js && node --check scripts/check-package-contents.mjs && node --check scripts/check-installed-runtime.mjs && node --check test/skill-metadata.test.js && node --check test/skills-first-package.test.js",
+    "pack:check": "node scripts/check-package-contents.mjs && node scripts/check-installed-runtime.mjs",
     "test": "node --test test/*.test.js"
   },
   "dependencies": {
