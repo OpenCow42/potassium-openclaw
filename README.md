@@ -70,7 +70,7 @@ openclaw plugins enable potassium
 Install from a pinned GitHub release or tag:
 
 ```sh
-openclaw plugins install git:github.com/OpenCow42/potassium-openclaw@0.4.0
+openclaw plugins install git:github.com/OpenCow42/potassium-openclaw@0.5.0
 openclaw plugins enable potassium
 ```
 

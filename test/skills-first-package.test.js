@@ -49,7 +49,7 @@ test("package declares a native OpenClaw plugin backed by the published liquid-p
   assert.equal(packageJson.name, "@opencow42/potassium-openclaw");
   assert.equal(packageLock.name, packageJson.name);
   assert.equal(packageLock.packages?.[""]?.name, packageJson.name);
-  assert.equal(packageJson.version, "0.4.0");
+  assert.equal(packageJson.version, "0.5.0");
   assert.equal(packageLock.version, packageJson.version);
   assert.equal(packageLock.packages?.[""]?.version, packageJson.version);
   assert.equal(packageJson.description, packageDescription);

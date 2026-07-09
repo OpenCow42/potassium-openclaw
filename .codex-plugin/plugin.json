@@ -1,6 +1,6 @@
 {
   "name": "potassium",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Native OpenClaw tools and skills for Infomaniak kDrive, Mail, kChat, URL shortener, and discovery workflows.",
   "author": {
     "name": "OpenCow",
