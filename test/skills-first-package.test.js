@@ -2823,10 +2823,132 @@ test("kChat WebSocket gateway redacts reconnect failure warnings", async () => {
   assert.equal(warnLogs[0].includes("secret-token"), false);
 });
 
+test("kChat WebSocket gateway reports privacy-safe runtime health", async () => {
+  const { startKchatWebSocketGatewayAccount } = await import(pathToFileURL(join(repositoryRoot, "index.js")).href);
+  const abortController = new AbortController();
+  const statusUpdates = [];
+  const channelConfig = {
+    teamName: "main-team",
+    websocketProtocol: "mattermost",
+    websocketChannelScope: "all",
+    websocketReconnectInitialMs: 0,
+    websocketReconnectMaxMs: 0,
+    responseMode: "all",
+  };
+  MockWebSocket.instances = [];
+
+  const gateway = startKchatWebSocketGatewayAccount({
+    cfg: { channels: { kchat: channelConfig } },
+    channelConfig,
+    token: websocketFixtureToken,
+    WebSocketImpl: MockWebSocket,
+    runtime: createKchatRuntimeStub({ inboundRuns: [] }),
+    abortSignal: abortController.signal,
+    statusSink(patch) {
+      statusUpdates.push(patch);
+    },
+  });
+
+  await waitForCondition(() => MockWebSocket.instances.length === 1 && MockWebSocket.instances[0].sent.length > 0);
+  const startedUpdate = statusUpdates[0];
+  assert.equal(startedUpdate?.running, true);
+  assert.equal(startedUpdate?.connected, false);
+  assert.equal(startedUpdate?.reconnectAttempts, 0);
+  assert.equal(typeof startedUpdate?.lastStartAt, "number");
+  assert.equal(startedUpdate?.lastError, null);
+
+  const socket = MockWebSocket.instances[0];
+  socket.emitMessage(JSON.stringify({ status: "OK", seq_reply: 1 }));
+  await waitForCondition(() => statusUpdates.some((patch) => patch.connected === true));
+  const connectedUpdate = statusUpdates.find((patch) => patch.connected === true);
+  assert.equal(connectedUpdate?.reconnectAttempts, 0);
+  assert.equal(typeof connectedUpdate?.lastConnectedAt, "number");
+  assert.equal(connectedUpdate?.lastError, null);
+
+  socket.emitMessage(
+    JSON.stringify({
+      event: "posted",
+      data: {
+        channel_name: "test",
+        post: JSON.stringify({
+          id: "post-runtime-health",
+          channel_id: "channel-123",
+          user_id: "user-123",
+          message: "private post body must not enter channel status",
+          create_at: 1710000000000,
+        }),
+      },
+      broadcast: { team_id: "team-123" },
+    }),
+  );
+  await waitForCondition(() => statusUpdates.some((patch) => typeof patch.lastInboundAt === "number"));
+  assert.equal(statusUpdates.some((patch) => typeof patch.lastEventAt === "number"), true);
+
+  socket.close();
+  await waitForCondition(() => MockWebSocket.instances.length === 2 && statusUpdates.some((patch) => patch.reconnectAttempts === 1));
+  const disconnectUpdate = statusUpdates.find((patch) => patch.reconnectAttempts === 1);
+  assert.equal(disconnectUpdate?.connected, false);
+  assert.equal(typeof disconnectUpdate?.lastDisconnect?.at, "number");
+  assert.equal(disconnectUpdate?.lastDisconnect?.error, undefined);
+
+  abortController.abort();
+  await gateway;
+  const stoppedUpdate = statusUpdates.at(-1);
+  assert.equal(stoppedUpdate?.running, false);
+  assert.equal(stoppedUpdate?.connected, false);
+  assert.equal(typeof stoppedUpdate?.lastStopAt, "number");
+
+  const serializedStatus = JSON.stringify(statusUpdates);
+  assert.equal(serializedStatus.includes("private post body must not enter channel status"), false);
+  assert.equal(serializedStatus.includes(websocketFixtureToken), false);
+});
+
+test("kChat WebSocket gateway records generic reconnect errors without secrets", async () => {
+  const { startKchatWebSocketGatewayAccount } = await import(pathToFileURL(join(repositoryRoot, "index.js")).href);
+  const abortController = new AbortController();
+  const statusUpdates = [];
+
+  class ThrowingWebSocket {
+    constructor() {
+      throw new Error("connect failed message=private-body token=secret-token Bearer secret-token");
+    }
+  }
+
+  await startKchatWebSocketGatewayAccount({
+    cfg: { channels: { kchat: { teamName: "main-team", websocketProtocol: "mattermost", websocketChannelScope: "all" } } },
+    channelConfig: {
+      teamName: "main-team",
+      websocketProtocol: "mattermost",
+      websocketChannelScope: "all",
+      websocketReconnectInitialMs: 0,
+      websocketReconnectMaxMs: 0,
+    },
+    token: websocketFixtureToken,
+    WebSocketImpl: ThrowingWebSocket,
+    runtime: createKchatRuntimeStub({ inboundRuns: [] }),
+    abortSignal: abortController.signal,
+    statusSink(patch) {
+      statusUpdates.push(patch);
+      if (patch.lastError) {
+        abortController.abort();
+      }
+    },
+  });
+
+  const failureUpdate = statusUpdates.find((patch) => patch.lastError === "kChat WebSocket connection failed.");
+  assert.equal(failureUpdate?.reconnectAttempts, 1);
+  assert.deepEqual(failureUpdate?.lastDisconnect?.error, "kChat WebSocket connection failed.");
+  const serializedStatus = JSON.stringify(statusUpdates);
+  assert.equal(serializedStatus.includes("private-body"), false);
+  assert.equal(serializedStatus.includes("secret-token"), false);
+  assert.equal(serializedStatus.includes(websocketFixtureToken), false);
+});
+
 test("kChat Infomaniak Echo WebSocket subscribes and dispatches posted events", async () => {
   const { runKchatWebSocketConnection } = await import(pathToFileURL(join(repositoryRoot, "index.js")).href);
   const inboundRuns = [];
   const dispatchResults = [];
+  const statusUpdates = [];
   const fetchCalls = [];
   const abortController = new AbortController();
   MockWebSocket.instances = [];
@@ -2858,6 +2980,9 @@ test("kChat Infomaniak Echo WebSocket subscribes and dispatches posted events", 
     fetch,
     runtime: createKchatRuntimeStub({ inboundRuns }),
     abortSignal: abortController.signal,
+    statusSink(patch) {
+      statusUpdates.push(patch);
+    },
     onDispatchResult(result) {
       dispatchResults.push(result);
     },
@@ -2892,6 +3017,7 @@ test("kChat Infomaniak Echo WebSocket subscribes and dispatches posted events", 
     socket.sent.map((value) => JSON.parse(value).data.channel),
     ["private-team.team-123", "presence-teamUser.user-self"],
   );
+  assert.equal(statusUpdates.some((patch) => patch.connected === true), false);
 
   socket.emitMessage(
     JSON.stringify({
@@ -2900,6 +3026,7 @@ test("kChat Infomaniak Echo WebSocket subscribes and dispatches posted events", 
       data: JSON.stringify({ presence: {} }),
     }),
   );
+  await waitForCondition(() => statusUpdates.some((patch) => patch.connected === true));
   socket.emitMessage(
     JSON.stringify({
       event: "posted",
@@ -2924,6 +3051,7 @@ test("kChat Infomaniak Echo WebSocket subscribes and dispatches posted events", 
   assert.equal(inboundRuns.length, 1);
   assert.equal(inboundRuns[0].raw.text, "ping from echo");
   assert.equal(inboundRuns[0].raw.post_id, "post-echo-123");
+  assert.equal(statusUpdates.some((patch) => typeof patch.lastInboundAt === "number"), true);
   assert.deepEqual(dispatchResults, [
     {
       dispatched: true,

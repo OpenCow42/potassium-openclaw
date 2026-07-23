@@ -221,6 +221,22 @@ message should dispatch to OpenClaw.
 For a plain Mattermost server, set `websocketProtocol: "mattermost"` and
 optionally `websocketUrl`.
 
+### Runtime Health
+
+When WebSocket receive mode is active, Potassium reports live account state to
+OpenClaw's channel status surface. Use `openclaw status --deep` to
+inspect whether the account is running and connected, its reconnect count, and
+the latest connection, disconnect, socket-event, and inbound-post timestamps.
+
+`connected` becomes true after a Mattermost authentication reply or an
+Infomaniak Echo subscription succeeds; it is false while reconnecting and after
+the account stops. Connection failures are reported as generic status messages,
+so channel status never includes kChat message text, bearer tokens, or raw
+socket errors.
+
+This reports live socket health only. It does not backfill posts sent while the
+socket was disconnected.
+
 ## Webhook Receive
 
 For webhook mode, create a kChat outgoing webhook that points at the OpenClaw

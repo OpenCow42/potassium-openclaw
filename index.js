@@ -1,5 +1,6 @@
 import { buildJsonPluginConfigSchema, definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
 import { createChannelPluginBase } from "openclaw/plugin-sdk/channel-core";
+import { createAccountStatusSink } from "openclaw/plugin-sdk/channel-lifecycle";
 import { createMessageReceiptFromOutboundResults, defineChannelMessageAdapter } from "openclaw/plugin-sdk/channel-outbound";
 import { loadOutboundMediaFromUrl } from "openclaw/plugin-sdk/outbound-media";
 import { resolveThreadSessionKeys } from "openclaw/plugin-sdk/routing";
@@ -37,6 +38,9 @@ const DEFAULT_KCHAT_WEBSOCKET_DISPATCH_QUEUE_SIZE = 100;
 const DEFAULT_KCHAT_ECHO_WEBSOCKET_HOST = "websocket.kchat.infomaniak.com";
 const DEFAULT_KCHAT_ECHO_APP_KEY = "kchat-key";
 const KCHAT_CHANNEL_ID = "kchat";
+const KCHAT_WEBSOCKET_CONNECTION_FAILURE_STATUS = "kChat WebSocket connection failed.";
+const KCHAT_WEBSOCKET_PRE_READY_CLOSE_STATUS = "kChat WebSocket closed before authentication completed.";
+const KCHAT_WEBSOCKET_DISPATCH_FAILURE_STATUS = "kChat WebSocket inbound dispatch failed.";
 
 export const PotassiumPluginConfigJsonSchema = withoutDirectTokenConfig(InfomaniakPluginConfigJsonSchema);
 export const PotassiumKchatChannelConfigJsonSchema = {
@@ -466,12 +470,18 @@ export const potassiumKchatChannelPlugin = {
         return undefined;
       }
 
+      const statusSink = createAccountStatusSink({
+        accountId: ctx.accountId,
+        setStatus: ctx.setStatus,
+      });
+
       return startKchatWebSocketGatewayAccount({
         cfg: ctx.cfg,
         channelConfig,
         channelRuntime: ctx.channelRuntime,
         abortSignal: ctx.abortSignal,
         log: ctx.log,
+        statusSink,
       });
     },
   },
@@ -1090,43 +1100,109 @@ export async function startKchatWebSocketGatewayAccount(options = {}) {
   const reconnectMaxMs = readOptionalNumber(channelConfig.websocketReconnectMaxMs) ?? DEFAULT_KCHAT_WEBSOCKET_RECONNECT_MAX_MS;
   const dedupeState = new Map();
   const responseGateState = options.responseGateState ?? createKchatResponseGateState();
+  const statusSink = resolveKchatWebSocketStatusSink(options.statusSink);
   let reconnectDelayMs = reconnectInitialMs;
+  let reconnectAttempts = 0;
 
-  if (!resolveKchatTokenFromOptions(options, channelConfig)) {
-    throw new Error(`Set ${resolveKchatTokenEnvName(channelConfig)} in the environment before enabling kChat WebSocket receive mode.`);
-  }
+  updateKchatWebSocketStatus(statusSink, {
+    running: true,
+    connected: false,
+    reconnectAttempts,
+    lastStartAt: Date.now(),
+    lastError: null,
+  });
 
-  while (!options.abortSignal?.aborted) {
-    const token = resolveKchatTokenFromOptions(options, channelConfig);
-    if (!token) {
+  try {
+    if (!resolveKchatTokenFromOptions(options, channelConfig)) {
       throw new Error(`Set ${resolveKchatTokenEnvName(channelConfig)} in the environment before enabling kChat WebSocket receive mode.`);
     }
 
-    try {
-      await runKchatWebSocketConnection({
-        ...options,
-        channelConfig,
-        token,
-        runtime: options.runtime ?? { channel: options.channelRuntime },
-        dedupeState,
-        responseGateState,
-      });
-      reconnectDelayMs = reconnectInitialMs;
-    } catch (error) {
+    while (!options.abortSignal?.aborted) {
+      const token = resolveKchatTokenFromOptions(options, channelConfig);
+      if (!token) {
+        throw new Error(`Set ${resolveKchatTokenEnvName(channelConfig)} in the environment before enabling kChat WebSocket receive mode.`);
+      }
+
+      let connectionReady = false;
+      let connectionError;
+      try {
+        await runKchatWebSocketConnection({
+          ...options,
+          channelConfig,
+          token,
+          runtime: options.runtime ?? { channel: options.channelRuntime },
+          dedupeState,
+          responseGateState,
+          statusSink,
+          onConnected() {
+            connectionReady = true;
+            options.onConnected?.();
+          },
+        });
+        reconnectDelayMs = reconnectInitialMs;
+      } catch (error) {
+        if (options.abortSignal?.aborted) {
+          break;
+        }
+
+        connectionError = error;
+        options.log?.warn?.(`kChat WebSocket connection ended: ${formatKchatSafeError(error)}`);
+      }
+
       if (options.abortSignal?.aborted) {
         break;
       }
 
-      options.log?.warn?.(`kChat WebSocket connection ended: ${formatKchatSafeError(error)}`);
-    }
-
-    if (!options.abortSignal?.aborted) {
+      reconnectAttempts += 1;
+      updateKchatWebSocketStatus(statusSink, {
+        running: true,
+        connected: false,
+        reconnectAttempts,
+        lastDisconnect: {
+          at: Date.now(),
+          ...(connectionError
+            ? { error: KCHAT_WEBSOCKET_CONNECTION_FAILURE_STATUS }
+            : connectionReady
+              ? {}
+              : { error: KCHAT_WEBSOCKET_PRE_READY_CLOSE_STATUS }),
+        },
+        ...(connectionError
+          ? { lastError: KCHAT_WEBSOCKET_CONNECTION_FAILURE_STATUS }
+          : connectionReady
+            ? {}
+            : { lastError: KCHAT_WEBSOCKET_PRE_READY_CLOSE_STATUS }),
+      });
       await sleepWithAbort(reconnectDelayMs, options.abortSignal);
       reconnectDelayMs = Math.min(reconnectDelayMs * 2, reconnectMaxMs);
     }
+  } catch (error) {
+    updateKchatWebSocketStatus(statusSink, {
+      running: false,
+      connected: false,
+      lastError: KCHAT_WEBSOCKET_CONNECTION_FAILURE_STATUS,
+    });
+    throw error;
+  } finally {
+    updateKchatWebSocketStatus(statusSink, {
+      running: false,
+      connected: false,
+      lastStopAt: Date.now(),
+    });
   }
 
   return undefined;
+}
+
+function resolveKchatWebSocketStatusSink(statusSink) {
+  return typeof statusSink === "function" ? statusSink : undefined;
+}
+
+function updateKchatWebSocketStatus(statusSink, patch) {
+  try {
+    statusSink?.(patch);
+  } catch {
+    // Channel status must not take down the inbound WebSocket lifecycle.
+  }
 }
 
 export async function runKchatWebSocketConnection(options = {}) {
@@ -1151,6 +1227,25 @@ export async function runKchatWebSocketConnection(options = {}) {
   const websocketTeamUserId = readOptionalString(channelConfig.websocketTeamUserId);
   const dedupeState = options.dedupeState ?? new Map();
   const responseGateState = options.responseGateState ?? createKchatResponseGateState();
+  const statusSink = resolveKchatWebSocketStatusSink(options.statusSink);
+  const protocol = resolveKchatWebSocketProtocol(channelConfig);
+  let connected = false;
+
+  const markConnected = () => {
+    if (connected) {
+      return;
+    }
+
+    connected = true;
+    updateKchatWebSocketStatus(statusSink, {
+      running: true,
+      connected: true,
+      reconnectAttempts: 0,
+      lastConnectedAt: Date.now(),
+      lastError: null,
+    });
+    options.onConnected?.();
+  };
 
   resolveKchatWebSocketChannelScope(channelConfig);
 
@@ -1176,12 +1271,15 @@ export async function runKchatWebSocketConnection(options = {}) {
     },
     onError(error) {
       options.log?.error?.(`kChat WebSocket dispatch failed: ${formatKchatSafeError(error)}`);
+      updateKchatWebSocketStatus(statusSink, {
+        lastError: KCHAT_WEBSOCKET_DISPATCH_FAILURE_STATUS,
+      });
     },
   });
 
   try {
     return await runLiquidKchatWebSocketConnection({
-      protocol: resolveKchatWebSocketProtocol(channelConfig),
+      protocol,
       token,
       fetch: options.fetch,
       webSocket: WebSocketImpl,
@@ -1195,10 +1293,28 @@ export async function runKchatWebSocketConnection(options = {}) {
       ...(websocketSubscriptions ? { subscriptions: websocketSubscriptions } : {}),
       ...(websocketTeamId ? { teamId: websocketTeamId } : {}),
       ...(websocketTeamUserId ? { teamUserId: websocketTeamUserId } : {}),
-      onFrame: options.onFrame,
-      onAuthenticated: options.onAuthenticated,
-      onSubscribed: options.onSubscribed,
+      onFrame(frame) {
+        updateKchatWebSocketStatus(statusSink, {
+          lastEventAt: Date.now(),
+          lastTransportActivityAt: Date.now(),
+        });
+        options.onFrame?.(frame);
+      },
+      onAuthenticated() {
+        options.onAuthenticated?.();
+        if (protocol === "mattermost") {
+          markConnected();
+        }
+      },
+      onSubscribed(channelName) {
+        options.onSubscribed?.(channelName);
+        markConnected();
+      },
       onPost(event) {
+        updateKchatWebSocketStatus(statusSink, {
+          lastInboundAt: Date.now(),
+          lastEventAt: Date.now(),
+        });
         options.onPost?.(event);
         const payload = normalizeKchatWebSocketPostEventPayload(event, channelConfig);
         const prepared = prepareKchatWebSocketDispatchPayload(payload, channelConfig);
@@ -1223,6 +1339,7 @@ export async function runKchatWebSocketConnection(options = {}) {
     });
   } finally {
     await dispatchQueue.drain();
+    updateKchatWebSocketStatus(statusSink, { connected: false });
   }
 }
 
