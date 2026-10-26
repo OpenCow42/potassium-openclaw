@@ -46,6 +46,7 @@ Useful `channels.kchat` config:
 - `websocketDedupeMaxEntries`: maximum number of post ids retained in the WebSocket duplicate suppression cache. Defaults to `10000`.
 - `websocketDispatchConcurrency`: maximum number of WebSocket post events dispatched into OpenClaw at the same time. Defaults to `1`.
 - `websocketDispatchQueueSize`: maximum number of WebSocket post events waiting for dispatch before new events are dropped with `dispatch_queue_full`. Defaults to `100`.
+- `threadHistory`: when `true` (default), the first inbound reply seen in an existing thread fetches earlier thread posts once and prepends them as agent context. `threadHistoryPostLimit` (default `20`, root included) and `threadHistoryMaxTextChars` (default `1000`) bound the context. Fetch failures fall back to the single post.
 - `websocketUrl`, `websocketHost`, `websocketAppKey`, `websocketAuthEndpoint`, `websocketSubscriptions`, `websocketTeamId`, and `websocketTeamUserId`: advanced WebSocket overrides. Prefer defaults unless the deployment needs explicit values.
 - `webhookPath`: inbound outgoing webhook path, default `/channels/kchat/webhook`.
 - `outgoingWebhookTokenEnvName`: webhook verification token env var, default `INFOMANIAK_KCHAT_OUTGOING_WEBHOOK_TOKEN`.

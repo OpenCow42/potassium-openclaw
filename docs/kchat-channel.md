@@ -149,6 +149,13 @@ and optional status updates.
   OpenClaw at the same time. Defaults to `1`.
 - `websocketDispatchQueueSize`: maximum WebSocket post events waiting for
   dispatch before new events are dropped. Defaults to `100`.
+- `threadHistory`: when `true` (default), the first inbound reply seen in an
+  existing thread fetches the thread and prepends earlier posts as agent
+  context. Set `false` to restore single-post behavior.
+- `threadHistoryPostLimit`: maximum earlier thread posts prepended, root post
+  included. Defaults to `20`.
+- `threadHistoryMaxTextChars`: maximum characters kept per thread history post
+  before truncation. Defaults to `1000`.
 
 ## Outbound Destinations
 
@@ -174,6 +181,21 @@ Threading rules:
   threaded under the original post.
 - Events without `channel_id` are dropped or rejected as missing reply context.
   They are not allowed to fall back to `defaultChannel`.
+
+### Thread History Backfill
+
+When the account is addressed inside a thread it has not seen yet (for example
+someone @-mentions the bot under an existing post), the inbound event only
+contains the new post. With `threadHistory` enabled, the plugin calls
+`GET /api/v4/posts/{root_id}/thread` once per thread root and prepends a compact
+`[kChat thread context: …]` block (author, timestamp, text) to the agent-facing
+text. The root post is always kept; the most recent replies fill the remaining
+`threadHistoryPostLimit` slots. Command parsing and the raw body are unchanged.
+
+Fetched thread roots are tracked in a bounded in-memory set, so follow-up
+replies in the same thread are not fetched again until the gateway restarts.
+Fetch errors (403, 404, network) are logged as warnings and the reply proceeds
+with the single post; the root is retried on the next reply.
 
 ## WebSocket Receive
 

@@ -268,6 +268,23 @@
             "minimum": 0,
             "default": 100,
             "description": "Maximum number of WebSocket post events waiting for dispatch before new events are dropped."
+          },
+          "threadHistory": {
+            "type": "boolean",
+            "default": true,
+            "description": "Whether the first inbound reply seen in an existing kChat thread fetches earlier thread posts and prepends them as agent context."
+          },
+          "threadHistoryPostLimit": {
+            "type": "integer",
+            "minimum": 1,
+            "default": 20,
+            "description": "Maximum number of earlier thread posts (root post included) prepended as agent context."
+          },
+          "threadHistoryMaxTextChars": {
+            "type": "integer",
+            "minimum": 1,
+            "default": 1000,
+            "description": "Maximum characters kept per thread history post before truncation."
           }
         }
       },
@@ -356,6 +373,15 @@
         },
         "websocketDedupeMaxEntries": {
           "label": "WebSocket dedupe max entries"
+        },
+        "threadHistory": {
+          "label": "Thread history backfill"
+        },
+        "threadHistoryPostLimit": {
+          "label": "Thread history post limit"
+        },
+        "threadHistoryMaxTextChars": {
+          "label": "Thread history max characters per post"
         }
       }
     }
