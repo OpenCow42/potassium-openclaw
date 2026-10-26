@@ -35,6 +35,10 @@ const DEFAULT_KCHAT_WEBSOCKET_DEDUPE_WINDOW_MS = 120000;
 const DEFAULT_KCHAT_WEBSOCKET_DEDUPE_MAX_ENTRIES = 10000;
 const DEFAULT_KCHAT_WEBSOCKET_DISPATCH_CONCURRENCY = 1;
 const DEFAULT_KCHAT_WEBSOCKET_DISPATCH_QUEUE_SIZE = 100;
+const DEFAULT_KCHAT_THREAD_HISTORY_POST_LIMIT = 20;
+const DEFAULT_KCHAT_THREAD_HISTORY_MAX_TEXT_CHARS = 1000;
+const KCHAT_THREAD_HISTORY_MAX_TRACKED_ROOTS = 1000;
+const KCHAT_THREAD_HISTORY_TIMEOUT_MS = 5000;
 const DEFAULT_KCHAT_ECHO_WEBSOCKET_HOST = "websocket.kchat.infomaniak.com";
 const DEFAULT_KCHAT_ECHO_APP_KEY = "kchat-key";
 const KCHAT_CHANNEL_ID = "kchat";
@@ -218,6 +222,24 @@ export const PotassiumKchatChannelConfigJsonSchema = {
       default: DEFAULT_KCHAT_WEBSOCKET_DISPATCH_QUEUE_SIZE,
       description: "Maximum number of WebSocket post events waiting for dispatch before new events are dropped.",
     },
+    threadHistory: {
+      type: "boolean",
+      default: true,
+      description:
+        "Whether the first inbound reply seen in an existing kChat thread fetches earlier thread posts and prepends them as agent context.",
+    },
+    threadHistoryPostLimit: {
+      type: "integer",
+      minimum: 1,
+      default: DEFAULT_KCHAT_THREAD_HISTORY_POST_LIMIT,
+      description: "Maximum number of earlier thread posts (root post included) prepended as agent context.",
+    },
+    threadHistoryMaxTextChars: {
+      type: "integer",
+      minimum: 1,
+      default: DEFAULT_KCHAT_THREAD_HISTORY_MAX_TEXT_CHARS,
+      description: "Maximum characters kept per thread history post before truncation.",
+    },
   },
 };
 
@@ -317,6 +339,9 @@ export const potassiumKchatChannelPlugin = {
         const websocketDedupeMaxEntries = readOptionalNumber(inputRecord.websocketDedupeMaxEntries);
         const websocketDispatchConcurrency = readOptionalNumber(inputRecord.websocketDispatchConcurrency);
         const websocketDispatchQueueSize = readOptionalNumber(inputRecord.websocketDispatchQueueSize);
+        const threadHistory = readOptionalBoolean(inputRecord.threadHistory);
+        const threadHistoryPostLimit = readOptionalNumber(inputRecord.threadHistoryPostLimit);
+        const threadHistoryMaxTextChars = readOptionalNumber(inputRecord.threadHistoryMaxTextChars);
 
         return {
           ...config,
@@ -355,6 +380,9 @@ export const potassiumKchatChannelPlugin = {
               ...(websocketDedupeMaxEntries === undefined ? {} : { websocketDedupeMaxEntries }),
               ...(websocketDispatchConcurrency === undefined ? {} : { websocketDispatchConcurrency }),
               ...(websocketDispatchQueueSize === undefined ? {} : { websocketDispatchQueueSize }),
+              ...(threadHistory === undefined ? {} : { threadHistory }),
+              ...(threadHistoryPostLimit === undefined ? {} : { threadHistoryPostLimit }),
+              ...(threadHistoryMaxTextChars === undefined ? {} : { threadHistoryMaxTextChars }),
             },
           },
         };
@@ -828,6 +856,7 @@ export function createPotassiumKchatWebhookHandler(options = {}) {
         token: options.token,
         log: options.log,
         responseGateState,
+        threadHistoryState: options.threadHistoryState,
       });
       if (dispatchResult?.dispatched === false) {
         respondJson(res, 200, { ok: true, status: "dropped" });
@@ -931,6 +960,7 @@ export async function dispatchKchatInboundWebhookEvent({
   token,
   log,
   responseGateState,
+  threadHistoryState,
 }) {
   const gateResult = await resolveKchatInboundResponseGate({
     channelConfig,
@@ -951,6 +981,16 @@ export async function dispatchKchatInboundWebhookEvent({
     throw new Error("OpenClaw channel inbound runtime is unavailable.");
   }
 
+  const textForAgent = await resolveKchatInboundTextForAgent({
+    channelConfig,
+    inbound,
+    client,
+    createClient,
+    fetch,
+    token,
+    log,
+    threadHistoryState,
+  });
   const accountId = "default";
   await channelRuntime.inbound.run({
     channel: KCHAT_CHANNEL_ID,
@@ -961,7 +1001,7 @@ export async function dispatchKchatInboundWebhookEvent({
         id: inbound.id,
         ...(inbound.timestamp === undefined ? {} : { timestamp: inbound.timestamp }),
         rawText: inbound.rawText,
-        textForAgent: inbound.textForAgent,
+        textForAgent,
         textForCommands: inbound.textForCommands,
         raw: inbound.raw,
       }),
@@ -1091,6 +1131,200 @@ export async function dispatchKchatInboundWebhookEvent({
     },
   });
   return createKchatInboundDispatchSuccess(inbound);
+}
+
+export function createKchatThreadHistoryState({ maxEntries = KCHAT_THREAD_HISTORY_MAX_TRACKED_ROOTS } = {}) {
+  return {
+    maxEntries: Math.max(1, Math.floor(readOptionalNumber(maxEntries) ?? KCHAT_THREAD_HISTORY_MAX_TRACKED_ROOTS)),
+    ingestedRoots: new Map(),
+  };
+}
+
+const defaultKchatThreadHistoryState = createKchatThreadHistoryState();
+
+function hasKchatThreadHistoryRoot(state, rootId) {
+  return state.ingestedRoots.has(rootId);
+}
+
+function markKchatThreadHistoryRoot(state, rootId) {
+  state.ingestedRoots.delete(rootId);
+  state.ingestedRoots.set(rootId, Date.now());
+  while (state.ingestedRoots.size > state.maxEntries) {
+    const oldest = state.ingestedRoots.keys().next().value;
+    state.ingestedRoots.delete(oldest);
+  }
+}
+
+function resolveKchatThreadHistoryEnabled(channelConfig) {
+  return readOptionalBoolean(isRecord(channelConfig) ? channelConfig.threadHistory : undefined) ?? true;
+}
+
+function resolveKchatThreadHistoryLimit(value, fallback) {
+  const parsed = readOptionalNumber(value);
+  return parsed === undefined || parsed < 1 ? fallback : Math.floor(parsed);
+}
+
+export function resolveKchatThreadHistoryRootId(inbound) {
+  const rootId = resolveKchatExistingThreadRootId(inbound);
+  if (!rootId || rootId === readOptionalString(inbound?.postId)) {
+    return undefined;
+  }
+
+  return rootId;
+}
+
+async function resolveKchatInboundTextForAgent({
+  channelConfig = {},
+  inbound,
+  client,
+  createClient,
+  fetch,
+  token,
+  log,
+  threadHistoryState = defaultKchatThreadHistoryState,
+}) {
+  const rootId = resolveKchatThreadHistoryRootId(inbound);
+  if (!rootId || !resolveKchatThreadHistoryEnabled(channelConfig) || hasKchatThreadHistoryRoot(threadHistoryState, rootId)) {
+    return inbound.textForAgent;
+  }
+
+  // Mark before fetching so concurrent replies in the same thread do not fetch twice.
+  markKchatThreadHistoryRoot(threadHistoryState, rootId);
+  try {
+    const operations = resolveKchatOperations(
+      resolveKchatClient({
+        channelConfig,
+        client,
+        createClient,
+        fetch,
+        token,
+      }),
+    );
+    const signal = AbortSignal.timeout(KCHAT_THREAD_HISTORY_TIMEOUT_MS);
+    const posts = await fetchKchatThreadHistoryPosts(operations, rootId, signal);
+    const context = formatKchatThreadHistoryContext(
+      posts.filter((post) => post.id !== readOptionalString(inbound.postId)),
+      {
+        rootId,
+        postLimit: resolveKchatThreadHistoryLimit(channelConfig.threadHistoryPostLimit, DEFAULT_KCHAT_THREAD_HISTORY_POST_LIMIT),
+        maxTextChars: resolveKchatThreadHistoryLimit(
+          channelConfig.threadHistoryMaxTextChars,
+          DEFAULT_KCHAT_THREAD_HISTORY_MAX_TEXT_CHARS,
+        ),
+        userNames: await resolveKchatThreadHistoryUserNames(operations, posts, log, signal),
+      },
+    );
+    return context ? `${context}\n\n${inbound.textForAgent}` : inbound.textForAgent;
+  } catch (error) {
+    threadHistoryState.ingestedRoots.delete(rootId);
+    log?.warn?.(`kChat thread history unavailable for root ${rootId}; continuing with the single post: ${formatKchatSafeError(error)}`);
+    return inbound.textForAgent;
+  }
+}
+
+async function fetchKchatThreadHistoryPosts(operations, rootId, signal) {
+  if (typeof operations.getpostthread !== "function") {
+    throw new Error("Infomaniak kChat getpostthread operation is unavailable.");
+  }
+
+  const response = unwrapProviderRecord(await operations.getpostthread({ path: { post_id: rootId }, signal }));
+  const postsById = isRecord(response?.posts) ? response.posts : undefined;
+  if (!postsById) {
+    throw new Error("Infomaniak kChat thread response did not include posts.");
+  }
+
+  return Object.values(postsById)
+    .map(normalizeKchatThreadHistoryPost)
+    .filter(Boolean)
+    .sort((left, right) => (left.id === rootId ? -1 : right.id === rootId ? 1 : left.createAt - right.createAt));
+}
+
+function normalizeKchatThreadHistoryPost(post) {
+  if (!isRecord(post)) {
+    return undefined;
+  }
+
+  const id = readOptionalString(post.id);
+  const deleteAt = readOptionalNumber(post.delete_at) ?? 0;
+  if (!id || deleteAt > 0) {
+    return undefined;
+  }
+
+  const userId = readOptionalString(post.user_id);
+  const overrideUserName = isRecord(post.props) ? readOptionalString(post.props.override_username) : undefined;
+  return {
+    id,
+    createAt: readOptionalNumber(post.create_at) ?? 0,
+    ...(userId ? { userId } : {}),
+    ...(overrideUserName ? { overrideUserName } : {}),
+    text: typeof post.message === "string" ? post.message.trim() : "",
+    fileCount: Array.isArray(post.file_ids) ? post.file_ids.length : 0,
+  };
+}
+
+async function resolveKchatThreadHistoryUserNames(operations, posts, log, signal) {
+  const userIds = [...new Set(posts.map((post) => post.userId).filter(Boolean))];
+  const userNames = new Map();
+  if (userIds.length === 0 || typeof operations.getusersbyids !== "function") {
+    return userNames;
+  }
+
+  try {
+    const response = await operations.getusersbyids({ body: userIds, signal });
+    const users = Array.isArray(response) ? response : Array.isArray(response?.data) ? response.data : [];
+    for (const value of users) {
+      const user = resolveProviderUser(value);
+      const label = user.username ?? user.name;
+      if (user.id && label) {
+        userNames.set(user.id, label);
+      }
+    }
+  } catch (error) {
+    log?.warn?.(`kChat thread history author lookup failed; using user ids: ${formatKchatSafeError(error)}`);
+  }
+
+  return userNames;
+}
+
+export function formatKchatThreadHistoryContext(posts, { rootId, postLimit, maxTextChars, userNames = new Map() } = {}) {
+  const limit = resolveKchatThreadHistoryLimit(postLimit, DEFAULT_KCHAT_THREAD_HISTORY_POST_LIMIT);
+  const maxChars = resolveKchatThreadHistoryLimit(maxTextChars, DEFAULT_KCHAT_THREAD_HISTORY_MAX_TEXT_CHARS);
+  if (!Array.isArray(posts) || posts.length === 0) {
+    return undefined;
+  }
+
+  // Always keep the root post, then the most recent replies that fit the limit.
+  const root = posts.find((post) => post.id === rootId);
+  const replies = posts.filter((post) => post.id !== rootId);
+  const keptReplies = replies.slice(Math.max(0, replies.length - (root ? limit - 1 : limit)));
+  const kept = root ? [root, ...keptReplies] : keptReplies;
+  const omitted = posts.length - kept.length;
+
+  const lines = [
+    `[kChat thread context: ${kept.length} earlier message${kept.length === 1 ? "" : "s"} from this thread, oldest first${
+      omitted > 0 ? `; ${omitted} older repl${omitted === 1 ? "y" : "ies"} omitted` : ""
+    }]`,
+  ];
+  for (const post of kept) {
+    const author = post.overrideUserName ?? (post.userId ? userNames.get(post.userId) ?? post.userId : "unknown");
+    const timestamp = post.createAt > 0 ? new Date(post.createAt).toISOString() : "unknown time";
+    const label = post.id === rootId ? " (thread root)" : "";
+    lines.push(`- ${timestamp} @${author}${label}: ${formatKchatThreadHistoryText(post, maxChars)}`);
+  }
+  lines.push("[End of kChat thread context. The new message follows.]");
+  return lines.join("\n");
+}
+
+function formatKchatThreadHistoryText(post, maxChars) {
+  const attachments = post.fileCount > 0 ? ` [${post.fileCount} attachment${post.fileCount === 1 ? "" : "s"}]` : "";
+  const text = post.text;
+  if (!text) {
+    return attachments.trim() || "(no text)";
+  }
+
+  const clipped = text.length > maxChars ? `${text.slice(0, maxChars).trimEnd()}… [truncated]` : text;
+  // Indent continuation lines so multi-line posts stay attached to their author.
+  return clipped.replace(/\r?\n/g, "\n  ") + attachments;
 }
 
 export async function startKchatWebSocketGatewayAccount(options = {}) {
@@ -1264,6 +1498,7 @@ export async function runKchatWebSocketConnection(options = {}) {
         token,
         log: options.log,
         responseGateState,
+        threadHistoryState: options.threadHistoryState,
       }),
     onResult(result) {
       logKchatWebSocketDispatchResult(result, options.log);
@@ -1374,6 +1609,7 @@ export async function dispatchKchatWebSocketEvent({
   token,
   log,
   responseGateState,
+  threadHistoryState,
 }) {
   const payload = normalizeKchatWebSocketPostEvent(frame, channelConfig);
   const prepared = prepareKchatWebSocketDispatchPayload(payload, channelConfig);
@@ -1396,6 +1632,7 @@ export async function dispatchKchatWebSocketEvent({
     token,
     log,
     responseGateState,
+    threadHistoryState,
   });
 }
 
@@ -1411,6 +1648,7 @@ export async function dispatchKchatWebSocketPostEvent({
   token,
   log,
   responseGateState,
+  threadHistoryState,
 }) {
   const payload = normalizeKchatWebSocketPostEventPayload(event, channelConfig);
   const prepared = prepareKchatWebSocketDispatchPayload(payload, channelConfig);
@@ -1433,6 +1671,7 @@ export async function dispatchKchatWebSocketPostEvent({
     token,
     log,
     responseGateState,
+    threadHistoryState,
   });
 }
 
@@ -1472,6 +1711,7 @@ async function dispatchPreparedKchatWebSocketInbound({
   token,
   log,
   responseGateState,
+  threadHistoryState,
 }) {
   const dispatchResult = await dispatchKchatInboundWebhookEvent({
     cfg,
@@ -1484,6 +1724,7 @@ async function dispatchPreparedKchatWebSocketInbound({
     token,
     log,
     responseGateState,
+    threadHistoryState,
   });
   if (dispatchResult?.dispatched === false) {
     return createKchatWebSocketDispatchDrop(dispatchResult.reason, inbound.raw ?? inbound);
