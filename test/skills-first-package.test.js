@@ -1466,10 +1466,12 @@ test("kChat inbound webhook response gate drops self messages and fails closed w
   assert.equal(response.statusCode, 200);
   assert.deepEqual(JSON.parse(response.body), { ok: true, status: "dropped" });
   assert.equal(identityFailureRuns.length, 0);
-  assert.equal(warnings.length, 1);
-  assert.match(warnings[0], /token=\[redacted\]/);
-  assert.equal(warnings[0].includes("secret-token"), false);
-  assert.equal(warnings[0].includes("@Potassium.Bot please respond"), false);
+  // The stub client has no getchannel operation, so the channel type fallback warns before the identity lookup.
+  assert.equal(warnings.length, 2);
+  assert.match(warnings[0], /channel type lookup failed; falling back to mention gate/);
+  assert.match(warnings[1], /token=\[redacted\]/);
+  assert.equal(warnings.some((warning) => warning.includes("secret-token")), false);
+  assert.equal(warnings.some((warning) => warning.includes("@Potassium.Bot please respond")), false);
 });
 
 test("kChat inbound webhook parses form and payload-wrapped bodies", async () => {
@@ -2117,10 +2119,12 @@ test("kChat WebSocket response gate handles addressed and unaddressed posts", as
     },
   );
   assert.equal(identityFailureRuns.length, 0);
-  assert.equal(warnings.length, 1);
-  assert.match(warnings[0], /token=\[redacted\]/);
-  assert.equal(warnings[0].includes("secret-token"), false);
-  assert.equal(warnings[0].includes("@Potassium.Bot please respond"), false);
+  // The stub client has no getchannel operation, so the channel type fallback warns before the identity lookup.
+  assert.equal(warnings.length, 2);
+  assert.match(warnings[0], /channel type lookup failed; falling back to mention gate/);
+  assert.match(warnings[1], /token=\[redacted\]/);
+  assert.equal(warnings.some((warning) => warning.includes("secret-token")), false);
+  assert.equal(warnings.some((warning) => warning.includes("@Potassium.Bot please respond")), false);
 
   const allRuns = [];
   assert.equal(
