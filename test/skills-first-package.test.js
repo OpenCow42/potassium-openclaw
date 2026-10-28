@@ -735,8 +735,8 @@ test("kChat inbound webhook dispatches valid JSON payloads through the channel r
   const routeCalls = [];
   const contextCalls = [];
   const handler = createPotassiumKchatWebhookHandler({
-    cfg: { channels: { kchat: { enabled: true } } },
-    channelConfig: {},
+    cfg: { channels: { kchat: { enabled: true, responseMode: "all" } } },
+    channelConfig: { responseMode: "all" },
     env: { INFOMANIAK_KCHAT_OUTGOING_WEBHOOK_TOKEN: "expected-placeholder" },
     runtime: createKchatRuntimeStub({ inboundRuns, routeCalls, contextCalls }),
   });
@@ -1334,8 +1334,17 @@ test("kChat inbound webhook response gate handles addressed and unaddressed mess
     body: createBody({ post_id: "post-thread", root_id: "root-thread", text: "thread continuation" }),
   });
   assert.equal(threadResponse.statusCode, 200);
-  assert.deepEqual(JSON.parse(threadResponse.body), { ok: true, status: "dispatched" });
-  assert.equal(threadRuns.length, 1);
+  assert.deepEqual(JSON.parse(threadResponse.body), { ok: true, status: "dropped" });
+  assert.equal(threadRuns.length, 0);
+
+  const threadMentionRuns = [];
+  const threadMentionResponse = await invokeWebhookHandler(createHandler({ inboundRuns: threadMentionRuns }), {
+    contentType: "application/json",
+    body: createBody({ post_id: "post-thread-mention", root_id: "root-thread", text: "@Potassium.Bot thread continuation" }),
+  });
+  assert.equal(threadMentionResponse.statusCode, 200);
+  assert.deepEqual(JSON.parse(threadMentionResponse.body), { ok: true, status: "dispatched" });
+  assert.equal(threadMentionRuns.length, 1);
 
   const directRuns = [];
   const directResponse = await invokeWebhookHandler(createHandler({ inboundRuns: directRuns }), {
@@ -2040,10 +2049,25 @@ test("kChat WebSocket response gate handles addressed and unaddressed posts", as
         frame: createFrame({ postId: "post-ws-thread", rootId: "root-ws-thread", message: "thread continuation" }),
         client: currentUserClient,
       })
+    ).reason,
+    "not_addressed",
+  );
+  assert.equal(threadRuns.length, 0);
+
+  const threadMentionRuns = [];
+  assert.equal(
+    (
+      await dispatchKchatWebSocketEvent({
+        cfg: { channels: { kchat: baseConfig } },
+        channelConfig: baseConfig,
+        runtime: createKchatRuntimeStub({ inboundRuns: threadMentionRuns }),
+        frame: createFrame({ postId: "post-ws-thread-mention", rootId: "root-ws-thread", message: "@Potassium.Bot thread continuation" }),
+        client: currentUserClient,
+      })
     ).dispatched,
     true,
   );
-  assert.equal(threadRuns.length, 1);
+  assert.equal(threadMentionRuns.length, 1);
 
   const directRuns = [];
   assert.equal(
@@ -2167,8 +2191,8 @@ test("kChat WebSocket inbound reply context preserves channel and thread roots",
   assert.equal(
     (
       await dispatchKchatWebSocketEvent({
-        cfg: { channels: { kchat: { teamName: "main-team", websocketChannelScope: "all", defaultChannel: "id:wrong-default-channel" } } },
-        channelConfig: { teamName: "main-team", websocketChannelScope: "all", defaultChannel: "id:wrong-default-channel" },
+        cfg: { channels: { kchat: { teamName: "main-team", websocketChannelScope: "all", defaultChannel: "id:wrong-default-channel", responseMode: "all" } } },
+        channelConfig: { teamName: "main-team", websocketChannelScope: "all", defaultChannel: "id:wrong-default-channel", responseMode: "all" },
         runtime: createKchatRuntimeStub({ inboundRuns: threadedRuns, realContext: true }),
         frame: threadedFrame,
       })

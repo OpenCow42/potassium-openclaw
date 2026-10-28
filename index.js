@@ -2421,10 +2421,9 @@ async function resolveKchatInboundResponseGate({
     return { dispatched: true };
   }
 
-  const existingThread = hasKchatExistingThread(inbound);
   const configuredAliases = resolveKchatConfiguredMentionAliases(channelConfig);
   const addressedByConfiguredAlias = isKchatMessageAddressedToAliases(resolveKchatInboundMessageText(inbound), configuredAliases);
-  if (responseMode === "mentions" && !existingThread && !addressedByConfiguredAlias) {
+  if (responseMode === "mentions" && !addressedByConfiguredAlias) {
     await ensureKchatInboundChannelType({
       channelConfig,
       inbound,
@@ -2437,7 +2436,7 @@ async function resolveKchatInboundResponseGate({
     });
   }
   const directOrGroupDm = isKchatDirectOrGroupDm(inbound);
-  const addressedWithoutIdentity = existingThread || directOrGroupDm || addressedByConfiguredAlias;
+  const addressedWithoutIdentity = directOrGroupDm || addressedByConfiguredAlias;
   const needsIdentity = ignoreSelfMessages || (responseMode === "mentions" && !addressedWithoutIdentity);
   let identity;
 
