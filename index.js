@@ -1510,7 +1510,8 @@ function normalizeKchatWebSocketPostEventPayload(event, channelConfig = {}) {
     readOptionalString(event.channelType) ??
     readOptionalString(event.channel_type) ??
     readOptionalString(event.rawPost?.channel_type) ??
-    readOptionalString(event.rawPost?.channelType);
+    readOptionalString(event.rawPost?.channelType) ??
+    readKchatWebSocketFrameChannelType(event.rawFrame);
   const teamDomain = readOptionalString(event.teamDomain) ?? readOptionalString(channelConfig.teamName);
   const teamId = readOptionalString(event.teamId);
   const postId = readOptionalString(event.postId) ?? readOptionalString(event.id);
@@ -1533,6 +1534,34 @@ function normalizeKchatWebSocketPostEventPayload(event, channelConfig = {}) {
     ...(text ? { text } : {}),
     ...(createAt === undefined ? {} : { create_at: createAt }),
   };
+}
+
+// Mattermost-style "posted" frames carry the channel type ("D"/"G"/"O"/"P") on the event data,
+// not on the post; liquid-potassium's normalizer drops it, so read it from the raw frame.
+function readKchatWebSocketFrameChannelType(frame) {
+  if (!isRecord(frame)) {
+    return undefined;
+  }
+
+  const data = parseKchatWebSocketFrameObject(frame.data);
+  return readOptionalString(data?.channel_type) ?? readOptionalString(data?.channelType);
+}
+
+function parseKchatWebSocketFrameObject(value) {
+  if (isRecord(value)) {
+    return value;
+  }
+
+  if (typeof value !== "string") {
+    return undefined;
+  }
+
+  try {
+    const parsed = JSON.parse(value);
+    return isRecord(parsed) ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function createKchatWebSocketDispatchDrop(reason, payload) {
@@ -2392,11 +2421,22 @@ async function resolveKchatInboundResponseGate({
     return { dispatched: true };
   }
 
-  const existingThread = hasKchatExistingThread(inbound);
-  const directOrGroupDm = isKchatDirectOrGroupDm(inbound);
   const configuredAliases = resolveKchatConfiguredMentionAliases(channelConfig);
   const addressedByConfiguredAlias = isKchatMessageAddressedToAliases(resolveKchatInboundMessageText(inbound), configuredAliases);
-  const addressedWithoutIdentity = existingThread || directOrGroupDm || addressedByConfiguredAlias;
+  if (responseMode === "mentions" && !addressedByConfiguredAlias) {
+    await ensureKchatInboundChannelType({
+      channelConfig,
+      inbound,
+      client,
+      createClient,
+      fetch,
+      token,
+      log,
+      responseGateState,
+    });
+  }
+  const directOrGroupDm = isKchatDirectOrGroupDm(inbound);
+  const addressedWithoutIdentity = directOrGroupDm || addressedByConfiguredAlias;
   const needsIdentity = ignoreSelfMessages || (responseMode === "mentions" && !addressedWithoutIdentity);
   let identity;
 
@@ -2464,6 +2504,67 @@ async function resolveKchatResponseGateIdentity({ channelConfig, client, createC
     }
     log?.warn?.(`kChat inbound response gate identity unavailable: ${formatKchatSafeError(error)}`);
     return undefined;
+  }
+}
+
+// Fills inbound.channelType via GET /api/v4/channels/{channel_id} when the event did not carry it,
+// so DMs bypass the mention gate. Cached per channel id (a channel's type never changes, but the
+// cache lives on responseGateState and is rebuilt on gateway restart). Failures are non-fatal.
+async function ensureKchatInboundChannelType({
+  channelConfig,
+  inbound,
+  client,
+  createClient,
+  fetch,
+  token,
+  log,
+  responseGateState,
+}) {
+  if (!isRecord(inbound) || resolveKchatInboundChannelType(inbound)) {
+    return;
+  }
+
+  const channelId = readOptionalString(inbound.channelId) ?? readOptionalString(inbound.raw?.channel_id);
+  if (!channelId) {
+    return;
+  }
+
+  const cache = responseGateState ? (responseGateState.channelTypeById ??= new Map()) : undefined;
+  const loadChannelType = async () => {
+    const resolvedClient = resolveKchatClient({
+      channelConfig,
+      client,
+      createClient,
+      fetch,
+      token,
+    });
+    const operations = resolveKchatOperations(resolvedClient);
+    if (typeof operations.getchannel !== "function") {
+      throw new Error("Infomaniak kChat getchannel operation is unavailable.");
+    }
+
+    const response = await operations.getchannel({ path: { channel_id: channelId } });
+    const type = readOptionalString(unwrapProviderRecord(response)?.type);
+    if (!type) {
+      throw new Error("kChat channel lookup did not return a channel type.");
+    }
+
+    return type;
+  };
+
+  try {
+    let pending = cache?.get(channelId);
+    if (!pending) {
+      pending = loadChannelType();
+      cache?.set(channelId, pending);
+    }
+
+    inbound.channelType = await pending;
+  } catch (error) {
+    cache?.delete(channelId);
+    log?.warn?.(
+      `kChat inbound channel type lookup failed; falling back to mention gate: ${formatKchatSafeError(error)}`,
+    );
   }
 }
 
